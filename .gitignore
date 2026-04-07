@@ -1,0 +1,23 @@
+node_modules/
+dist/
+release/
+*.rar
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Env
+.env
+.env.*
+
+# Electron builder caches
+__pycache__/
+*.log

@@ -1,0 +1,79 @@
+{
+  "name": "lhg-system",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LkzCAJATI/LHG_SYSTEM"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron": "electron .",
+    "build:exe": "vite build && electron-builder --win",
+    "build:exe:publish": "vite build && electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "@types/uuid": "^10.0.0",
+    "clsx": "2.1.1",
+    "date-fns": "^4.1.0",
+    "electron-updater": "^6.8.3",
+    "lucide-react": "^1.7.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-hot-toast": "^2.6.0",
+    "tailwind-merge": "3.4.0",
+    "uuid": "^13.0.0",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.1.17",
+    "@types/node": "22.19.17",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.1",
+    "electron": "^36.2.1",
+    "electron-builder": "^24.13.3",
+    "png-to-ico": "^3.0.1",
+    "tailwindcss": "4.1.17",
+    "typescript": "5.9.3",
+    "vite": "7.2.4",
+    "vite-plugin-singlefile": "2.3.0"
+  },
+  "build": {
+    "appId": "com.lhgsystem.app",
+    "productName": "LHG SYSTEM",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh",
+      "runAfterFinish": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "LkzCAJATI",
+      "repo": "LHG_SYSTEM",
+      "releaseType": "release"
+    }
+  }
+}
