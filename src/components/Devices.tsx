@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useNetworkStore } from '../store/networkStore';
-import { Device, Customer } from '../types';
+import { Device, Customer, Session } from '../types';
 
 // Ícone de Monitor
 const MonitorIcon = () => (
@@ -25,7 +25,7 @@ const JoystickIcon = () => (
 );
 
 const Devices: React.FC = () => {
-  const { devices, customers, startSession, endSession } = useStore();
+  const { devices, customers, startSession, endSessionSavingTime, pauseSession, resumeSession } = useStore();
   const { 
     isServerRunning, 
     connectedClients, 
@@ -37,9 +37,12 @@ const Devices: React.FC = () => {
     startRemoteDesktop,
     remoteDesktopSession,
     stopRemoteDesktop,
+    startServer,
+    stopServer
   } = useNetworkStore();
   
   const [activeFilter, setActiveFilter] = useState<'all' | 'pc' | 'console' | 'arcade'>('all');
+  const [isScanning, setIsScanning] = useState(false);
   const [showStartModal, setShowStartModal] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [customerName, setCustomerName] = useState('');
@@ -72,6 +75,7 @@ const Devices: React.FC = () => {
     switch (status) {
       case 'available': return 'bg-green-500';
       case 'in_use': return 'bg-yellow-500';
+      case 'paused': return 'bg-orange-500';
       case 'maintenance': return 'bg-red-500';
     }
   };
@@ -80,6 +84,7 @@ const Devices: React.FC = () => {
     switch (status) {
       case 'available': return 'Disponível';
       case 'in_use': return 'Em Uso';
+      case 'paused': return 'Pausado';
       case 'maintenance': return 'Manutenção';
     }
   };
@@ -117,7 +122,7 @@ const Devices: React.FC = () => {
 
   const handleEndSession = (device: Device) => {
     if (device.currentSession) {
-      endSession(device.currentSession.id);
+      endSessionSavingTime(device.currentSession.id);
     }
   };
 
@@ -151,9 +156,10 @@ const Devices: React.FC = () => {
     setShowRemoteModal(false);
   };
 
-  const formatDuration = (startTime?: Date) => {
-    if (!startTime) return '00:00:00';
-    const diff = Date.now() - new Date(startTime).getTime();
+  const formatDuration = (session?: Session) => {
+    if (!session || !session.startTime) return '00:00:00';
+    const nowMs = session.isPaused && session.pausedAt ? new Date(session.pausedAt).getTime() : Date.now();
+    const diff = Math.max(0, nowMs - new Date(session.startTime).getTime() - (session.totalPausedTime || 0));
     const hours = Math.floor(diff / 3600000);
     const minutes = Math.floor((diff % 3600000) / 60000);
     const seconds = Math.floor((diff % 60000) / 1000);
@@ -182,11 +188,41 @@ const Devices: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-800">Dispositivos</h1>
           <p className="text-gray-600">Gerencie todos os dispositivos da sua LAN House</p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`w-3 h-3 rounded-full ${isServerRunning ? 'bg-green-500' : 'bg-red-500'}`}></span>
-          <span className="text-sm text-gray-600">
-            Servidor: {isServerRunning ? 'Online' : 'Offline'}
-          </span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg shadow-sm">
+            <span className={`w-3 h-3 rounded-full ${isServerRunning ? 'bg-green-500' : 'bg-red-500'}`}></span>
+            <span className="text-sm font-medium text-gray-700">
+              Servidor: {isServerRunning ? 'Online' : 'Offline'}
+            </span>
+            <button
+              onClick={() => isServerRunning ? stopServer() : startServer()}
+              className={`ml-2 px-3 py-1 rounded text-xs font-bold transition-colors ${
+                isServerRunning 
+                  ? 'bg-red-100 text-red-700 hover:bg-red-200' 
+                  : 'bg-green-100 text-green-700 hover:bg-green-200'
+              }`}
+            >
+              {isServerRunning ? 'Desligar' : 'Ativar'}
+            </button>
+          </div>
+          
+          <button
+            onClick={() => {
+              setIsScanning(true);
+              setTimeout(() => setIsScanning(false), 1500); // call to refresh
+            }}
+            disabled={!isServerRunning || isScanning}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+              isServerRunning && !isScanning
+                ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            <svg className={`w-5 h-5 ${isScanning ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {isScanning ? 'Atualizando...' : 'Atualizar Rede'}
+          </button>
         </div>
       </div>
 
@@ -264,12 +300,14 @@ const Devices: React.FC = () => {
               key={device.id}
               className={`bg-white rounded-xl shadow-lg overflow-hidden border-2 transition-all hover:shadow-xl ${
                 device.status === 'in_use' ? 'border-yellow-400' : 
+                device.status === 'paused' ? 'border-orange-400' : 
                 device.status === 'available' ? 'border-green-400' : 'border-red-400'
               }`}
             >
               {/* Header do Card */}
               <div className={`p-4 ${
                 device.status === 'in_use' ? 'bg-yellow-50' : 
+                device.status === 'paused' ? 'bg-orange-50' : 
                 device.status === 'available' ? 'bg-green-50' : 'bg-red-50'
               }`}>
                 <div className="flex items-center justify-between">
@@ -293,11 +331,11 @@ const Devices: React.FC = () => {
 
               {/* Conteúdo do Card */}
               <div className="p-4">
-                {device.status === 'in_use' && device.currentSession && (
+                {(device.status === 'in_use' || device.status === 'paused') && device.currentSession && (
                   <div className="mb-3">
                     <div className="text-xs text-gray-500 mb-1">Tempo de Uso</div>
-                    <div className="text-xl font-mono font-bold text-gray-800">
-                      {formatDuration(device.currentSession.startTime)}
+                    <div className={`text-xl font-mono font-bold ${device.status === 'paused' ? 'text-orange-500 opacity-80' : 'text-gray-800'}`}>
+                      {formatDuration(device.currentSession)}
                     </div>
                     {device.currentSession.customerName && (
                       <div className="text-sm text-gray-600 mt-1">
@@ -329,13 +367,23 @@ const Devices: React.FC = () => {
                     </button>
                   )}
                   
-                  {device.status === 'in_use' && (
-                    <button
-                      onClick={() => handleEndSession(device)}
-                      className="w-full py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
-                    >
-                      ⏹ Finalizar
-                    </button>
+                  {(device.status === 'in_use' || device.status === 'paused') && device.currentSession && (
+                    <div className="flex flex-col gap-2">
+                      <button
+                        onClick={() => device.status === 'in_use' ? pauseSession(device.currentSession!.id) : resumeSession(device.currentSession!.id)}
+                        className={`w-full py-2 text-white rounded-lg font-medium transition-colors ${
+                          device.status === 'in_use' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-500 hover:bg-green-600'
+                        }`}
+                      >
+                        {device.status === 'in_use' ? '⏸ Pausar Tempo' : '▶ Retomar Tempo'}
+                      </button>
+                      <button
+                        onClick={() => handleEndSession(device)}
+                        className="w-full py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
+                      >
+                        ⏹ Finalizar
+                      </button>
+                    </div>
                   )}
 
                   {/* Controles Remotos (apenas para PCs conectados) */}

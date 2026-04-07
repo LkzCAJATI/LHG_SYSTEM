@@ -11,7 +11,7 @@ export interface Device {
   id: string;
   name: string;
   type: 'pc' | 'playstation' | 'console' | 'arcade';
-  status: 'available' | 'in_use' | 'maintenance';
+  status: 'available' | 'in_use' | 'paused' | 'maintenance';
   currentSession?: Session;
   pricePerHour: number;
   consoleType?: 'playstation' | 'xbox' | 'switch' | 'other';
@@ -36,6 +36,9 @@ export interface Session {
   extraControllers: number;
   totalPrice: number;
   paid: boolean;
+  isPaused?: boolean;
+  pausedAt?: Date;
+  totalPausedTime?: number; // In milliseconds
 }
 
 export interface Product {

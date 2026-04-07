@@ -48,7 +48,9 @@ interface AppState {
   deleteDevice: (id: string) => void;
   startSession: (deviceId: string, customerName: string, duration: number, extraControllers: number, customerId?: string) => void;
   endSession: (sessionId: string) => void;
-  endSessionSavingTime: (sessionId: string, elapsedSeconds: number) => void;
+  endSessionSavingTime: (sessionId: string) => void;
+  pauseSession: (sessionId: string) => void;
+  resumeSession: (sessionId: string) => void;
   
   // Product Actions
   addProduct: (product: Omit<Product, 'id'>) => void;
@@ -277,9 +279,14 @@ export const useStore = create<AppState>()(
       },
 
       // Encerra a sessão e, se o cliente tiver cadastro, salva o tempo restante como créditos
-      endSessionSavingTime: (sessionId, elapsedSeconds) => {
+      endSessionSavingTime: (sessionId) => {
         const session = get().sessions.find(s => s.id === sessionId);
         if (!session) return;
+
+        const now = session.isPaused && session.pausedAt ? new Date(session.pausedAt).getTime() : new Date().getTime();
+        const diff = now - new Date(session.startTime).getTime();
+        const effectiveElapsedMs = Math.max(0, diff - (session.totalPausedTime || 0));
+        const elapsedSeconds = Math.floor(effectiveElapsedMs / 1000);
 
         // Sessão tem duração em MINUTOS no store, elapsedSeconds é o tempo já usado em segundos
         const totalSeconds = session.duration * 60;
@@ -289,7 +296,7 @@ export const useStore = create<AppState>()(
         // Finaliza a sessão
         set(state => ({
           sessions: state.sessions.map(s =>
-            s.id === sessionId ? { ...s, endTime: new Date(), paid: true } : s
+            s.id === sessionId ? { ...s, endTime: new Date(), paid: true, isPaused: false } : s
           ),
           devices: state.devices.map(d =>
             d.id === session.deviceId
@@ -302,6 +309,42 @@ export const useStore = create<AppState>()(
         if (session.customerId && remainingMinutes > 0) {
           get().addCredits(session.customerId, remainingMinutes);
         }
+      },
+
+      pauseSession: (sessionId) => {
+        const session = get().sessions.find(s => s.id === sessionId);
+        if (!session || session.isPaused) return;
+
+        const updatedSession = { ...session, isPaused: true, pausedAt: new Date() };
+
+        set(state => ({
+          sessions: state.sessions.map(s => s.id === sessionId ? updatedSession : s),
+          devices: state.devices.map(d =>
+            d.id === session.deviceId ? { ...d, status: 'paused' as const, currentSession: updatedSession } : d
+          )
+        }));
+      },
+
+      resumeSession: (sessionId) => {
+        const session = get().sessions.find(s => s.id === sessionId);
+        if (!session || !session.isPaused || !session.pausedAt) return;
+
+        const pausedDurationMs = new Date().getTime() - new Date(session.pausedAt).getTime();
+        const totalPausedTimeMs = (session.totalPausedTime || 0) + pausedDurationMs;
+
+        const updatedSession = { 
+          ...session, 
+          isPaused: false, 
+          pausedAt: undefined, 
+          totalPausedTime: totalPausedTimeMs 
+        };
+
+        set(state => ({
+          sessions: state.sessions.map(s => s.id === sessionId ? updatedSession : s),
+          devices: state.devices.map(d =>
+            d.id === session.deviceId ? { ...d, status: 'in_use' as const, currentSession: updatedSession } : d
+          )
+        }));
       },
 
       // Product Actions

@@ -50,7 +50,7 @@ export function Layout({ children }: LayoutProps) {
             )}
             <div>
               <h1 className="font-bold text-lg truncate max-w-[140px]">{settings.systemName}</h1>
-              <p className="text-xs text-gray-400">Sistema de Gerenciamento</p>
+              <p className="text-xs text-gray-400">Sistema (v1.0.0)</p>
             </div>
           </div>
         </div>
