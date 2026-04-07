@@ -3,11 +3,14 @@ import { useStore } from '../store/useStore';
 import { Budget, BudgetItem } from '../types';
 import {
   FileText, Plus, Edit, Trash2, ShoppingCart,
-  X, Search
+  X, Search, Download
 } from 'lucide-react';
+import { generateBudgetPDF } from '../utils/pdfGenerator';
+import { useSettingsStore } from '../store/settingsStore';
 
 export function Budgets() {
   const { budgets, addBudget, updateBudget, deleteBudget, convertBudgetToSale, setCurrentPage } = useStore();
+  const { settings } = useSettingsStore();
   const [showModal, setShowModal] = useState(false);
   const [editingBudget, setEditingBudget] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -245,6 +248,14 @@ export function Budgets() {
                   </button>
                 </>
               )}
+              <button
+                onClick={() => generateBudgetPDF(budget, settings)}
+                className="flex-1 px-3 py-2 border border-purple-200 text-purple-600 rounded-lg hover:bg-purple-50 flex items-center justify-center gap-1"
+                title="Baixar PDF"
+              >
+                <Download className="w-4 h-4" />
+                PDF
+              </button>
               <button
                 onClick={() => handleDelete(budget.id)}
                 className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg"
