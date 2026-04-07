@@ -5,6 +5,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const { autoUpdater } = require("electron-updater");
 
+let allowClientQuit = false;
 const DATA_VERSION = 1;
 const DATA_DIR_NAME = "lhg-data";
 const DATA_FILE_NAME = "state.json";
@@ -101,6 +102,11 @@ function registerIpcHandlers() {
       dataFile
     };
   });
+
+  ipcMain.handle("lhg:app:quit", async () => {
+    allowClientQuit = true;
+    app.quit();
+  });
 }
 
 function getInstallMode() {
@@ -157,6 +163,12 @@ async function createWindow() {
       openAtLogin: true,
       path: process.execPath
     });
+
+    win.on("close", (e) => {
+      if (!allowClientQuit) {
+        e.preventDefault();
+      }
+    });
   }
 
   win.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
@@ -183,18 +195,8 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on("update-downloaded", async () => {
-    const result = await dialog.showMessageBox({
-      type: "info",
-      buttons: ["Atualizar Agora", "Depois"],
-      defaultId: 0,
-      cancelId: 1,
-      title: "Atualização disponível",
-      message: "Uma nova versão foi baixada. Deseja reiniciar e atualizar agora?"
-    });
-
-    if (result.response === 0) {
-      autoUpdater.quitAndInstall();
-    }
+    allowClientQuit = true;
+    autoUpdater.quitAndInstall();
   });
 
   autoUpdater.checkForUpdatesAndNotify().catch(() => {

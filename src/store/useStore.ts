@@ -46,8 +46,9 @@ interface AppState {
   addDevice: (device: Omit<Device, 'id'>) => void;
   updateDevice: (id: string, device: Partial<Device>) => void;
   deleteDevice: (id: string) => void;
-  startSession: (deviceId: string, customerName: string, duration: number, extraControllers: number) => void;
+  startSession: (deviceId: string, customerName: string, duration: number, extraControllers: number, customerId?: string) => void;
   endSession: (sessionId: string) => void;
+  endSessionSavingTime: (sessionId: string, elapsedSeconds: number) => void;
   
   // Product Actions
   addProduct: (product: Omit<Product, 'id'>) => void;
@@ -222,7 +223,7 @@ export const useStore = create<AppState>()(
         }));
       },
 
-      startSession: (deviceId, customerName, duration, extraControllers) => {
+      startSession: (deviceId, customerName, duration, extraControllers, customerId) => {
         const device = get().devices.find(d => d.id === deviceId);
         if (!device) return;
 
@@ -240,6 +241,7 @@ export const useStore = create<AppState>()(
           id: generateId(),
           deviceId,
           deviceName: device.name,
+          customerId: customerId ?? undefined,
           customerName,
           startTime: new Date(),
           duration: duration * 60, // converter para minutos
@@ -272,6 +274,34 @@ export const useStore = create<AppState>()(
               : d
           ),
         }));
+      },
+
+      // Encerra a sessão e, se o cliente tiver cadastro, salva o tempo restante como créditos
+      endSessionSavingTime: (sessionId, elapsedSeconds) => {
+        const session = get().sessions.find(s => s.id === sessionId);
+        if (!session) return;
+
+        // Sessão tem duração em MINUTOS no store, elapsedSeconds é o tempo já usado em segundos
+        const totalSeconds = session.duration * 60;
+        const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds);
+        const remainingMinutes = Math.floor(remainingSeconds / 60);
+
+        // Finaliza a sessão
+        set(state => ({
+          sessions: state.sessions.map(s =>
+            s.id === sessionId ? { ...s, endTime: new Date(), paid: true } : s
+          ),
+          devices: state.devices.map(d =>
+            d.id === session.deviceId
+              ? { ...d, status: 'available' as const, currentSession: undefined }
+              : d
+          ),
+        }));
+
+        // Se tem cliente cadastrado e sobrou tempo, credita os minutos restantes
+        if (session.customerId && remainingMinutes > 0) {
+          get().addCredits(session.customerId, remainingMinutes);
+        }
       },
 
       // Product Actions

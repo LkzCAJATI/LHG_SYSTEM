@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useNetworkStore } from '../store/networkStore';
-import { Device } from '../types';
+import { Device, Customer } from '../types';
 
 // Ícone de Monitor
 const MonitorIcon = () => (
@@ -25,7 +25,7 @@ const JoystickIcon = () => (
 );
 
 const Devices: React.FC = () => {
-  const { devices, startSession, endSession } = useStore();
+  const { devices, customers, startSession, endSession } = useStore();
   const { 
     isServerRunning, 
     connectedClients, 
@@ -47,6 +47,18 @@ const Devices: React.FC = () => {
   const [extraControllers, setExtraControllers] = useState(0);
   const [showRemoteModal, setShowRemoteModal] = useState(false);
   const [remoteMessage, setRemoteMessage] = useState('');
+
+  // Estado para busca de cliente cadastrado
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [useRegisteredCustomer, setUseRegisteredCustomer] = useState(false);
+
+  const filteredCustomers = customerSearch.length >= 2
+    ? customers.filter(c =>
+        c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+        c.username.toLowerCase().includes(customerSearch.toLowerCase())
+      ).slice(0, 5)
+    : [];
 
   const getDeviceIcon = (type: Device['type']) => {
     switch (type) {
@@ -90,12 +102,17 @@ const Devices: React.FC = () => {
 
   const handleConfirmStart = () => {
     if (!selectedDevice) return;
-    startSession(selectedDevice.id, customerName || 'Cliente', duration, extraControllers);
+    const name = selectedCustomer ? selectedCustomer.name : (customerName || 'Cliente');
+    const custId = selectedCustomer ? selectedCustomer.id : undefined;
+    startSession(selectedDevice.id, name, duration, extraControllers, custId);
     setShowStartModal(false);
     setSelectedDevice(null);
     setCustomerName('');
     setDuration(60);
     setExtraControllers(0);
+    setCustomerSearch('');
+    setSelectedCustomer(null);
+    setUseRegisteredCustomer(false);
   };
 
   const handleEndSession = (device: Device) => {
@@ -125,7 +142,7 @@ const Devices: React.FC = () => {
   };
 
   const handleRemoteDesktop = (device: Device) => {
-    startRemoteDesktop(device.id, device.name);
+    startRemoteDesktop(device.id);
     setShowRemoteModal(true);
   };
 
@@ -375,16 +392,87 @@ const Devices: React.FC = () => {
             <h2 className="text-xl font-bold mb-4">Iniciar Sessão - {selectedDevice.name}</h2>
             
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nome do Cliente</label>
-                <input
-                  type="text"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Nome do cliente (opcional)"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
+              {/* Seleção: cliente com cadastro ou sem */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setUseRegisteredCustomer(false); setSelectedCustomer(null); setCustomerSearch(''); }}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    !useRegisteredCustomer ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  Sem cadastro
+                </button>
+                <button
+                  onClick={() => { setUseRegisteredCustomer(true); setCustomerName(''); }}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    useRegisteredCustomer ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  Cliente cadastrado
+                </button>
               </div>
+
+              {/* Campo de nome livre (sem cadastro) */}
+              {!useRegisteredCustomer && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Nome do Cliente</label>
+                  <input
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="Nome do cliente (opcional)"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              )}
+
+              {/* Busca de cliente cadastrado */}
+              {useRegisteredCustomer && (
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Buscar Cliente</label>
+                  {selectedCustomer ? (
+                    <div className="flex items-center gap-2 bg-green-50 border border-green-300 rounded-lg px-4 py-2">
+                      <span className="flex-1">
+                        <span className="font-medium text-green-800">{selectedCustomer.name}</span>
+                        <span className="text-green-600 text-sm ml-2">@{selectedCustomer.username}</span>
+                        <span className="text-green-500 text-xs ml-2">{selectedCustomer.credits} min em créditos</span>
+                      </span>
+                      <button
+                        onClick={() => { setSelectedCustomer(null); setCustomerSearch(''); }}
+                        className="text-gray-400 hover:text-red-500 text-lg font-bold"
+                      >&#x2715;</button>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        value={customerSearch}
+                        onChange={(e) => setCustomerSearch(e.target.value)}
+                        placeholder="Digite nome ou usuário..."
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      {filteredCustomers.length > 0 && (
+                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                          {filteredCustomers.map(c => (
+                            <button
+                              key={c.id}
+                              onClick={() => { setSelectedCustomer(c); setCustomerSearch(''); }}
+                              className="w-full text-left px-4 py-2 hover:bg-purple-50 transition-colors"
+                            >
+                              <span className="font-medium text-gray-800">{c.name}</span>
+                              <span className="text-gray-500 text-sm ml-2">@{c.username}</span>
+                              <span className="text-purple-500 text-xs ml-2">{c.credits} min</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {customerSearch.length >= 2 && filteredCustomers.length === 0 && (
+                        <p className="text-sm text-gray-400 mt-1">Nenhum cliente encontrado</p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Duração (minutos)</label>
@@ -462,54 +550,58 @@ const Devices: React.FC = () => {
       )}
 
       {/* Modal de Acesso Remoto */}
-      {showRemoteModal && remoteDesktopSession && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">
-                Acesso Remoto - {remoteDesktopSession.deviceName}
-              </h2>
-              <button
-                onClick={handleCloseRemote}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
-            </div>
-            
-            {/* Simulação de tela remota */}
-            <div className="bg-gray-900 rounded-lg h-64 flex items-center justify-center mb-4">
-              <div className="text-center">
-                <div className="text-6xl mb-4">🖥️</div>
-                <p className="text-gray-400">Tela remota simulada</p>
-                <p className="text-gray-500 text-sm">
-                  Em produção, aqui seria exibida a tela do PC remoto via WebRTC/VNC
-                </p>
+      {showRemoteModal && remoteDesktopSession && (() => {
+        const remoteDevice = devices.find(d => d.id === remoteDesktopSession);
+        const remoteDeviceName = remoteDevice?.name ?? remoteDesktopSession;
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 w-full max-w-2xl">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold">
+                  Acesso Remoto - {remoteDeviceName}
+                </h2>
+                <button
+                  onClick={handleCloseRemote}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              {/* Simulação de tela remota */}
+              <div className="bg-gray-900 rounded-lg h-64 flex items-center justify-center mb-4">
+                <div className="text-center">
+                  <div className="text-6xl mb-4">🖥️</div>
+                  <p className="text-gray-400">Tela remota simulada</p>
+                  <p className="text-gray-500 text-sm">
+                    Em produção, aqui seria exibida a tela do PC remoto via WebRTC/VNC
+                  </p>
+                </div>
+              </div>
+
+              {/* Enviar mensagem */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={remoteMessage}
+                  onChange={(e) => setRemoteMessage(e.target.value)}
+                  placeholder="Enviar mensagem para o cliente..."
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <button
+                  onClick={() => {
+                    alert(`Mensagem enviada para ${remoteDeviceName}: "${remoteMessage}"`);
+                    setRemoteMessage('');
+                  }}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium"
+                >
+                  Enviar
+                </button>
               </div>
             </div>
-
-            {/* Enviar mensagem */}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={remoteMessage}
-                onChange={(e) => setRemoteMessage(e.target.value)}
-                placeholder="Enviar mensagem para o cliente..."
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-              <button
-                onClick={() => {
-                  alert(`Mensagem enviada para ${remoteDesktopSession.deviceName}: "${remoteMessage}"`);
-                  setRemoteMessage('');
-                }}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium"
-              >
-                Enviar
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Lista de Clientes Conectados */}
       {connectedClients.length > 0 && (
@@ -528,18 +620,18 @@ const Devices: React.FC = () => {
               <tbody className="divide-y divide-gray-200">
                 {connectedClients.map(client => (
                   <tr key={client.id}>
-                    <td className="px-4 py-3 font-medium">{client.deviceName || 'Não registrado'}</td>
+                    <td className="px-4 py-3 font-medium">{client.deviceName || client.name || 'Não registrado'}</td>
                     <td className="px-4 py-3 text-gray-600">{client.ip}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 text-xs rounded-full ${
-                        client.status === 'connected' ? 'bg-green-100 text-green-700' :
+                        client.status === 'online' ? 'bg-green-100 text-green-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
-                        {client.status === 'connected' ? 'Conectado' : 'Desconectado'}
+                        {client.status === 'online' ? 'Conectado' : 'Desconectado'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600">
-                      {new Date(client.connectedAt).toLocaleTimeString('pt-BR')}
+                      {client.connectedAt ? new Date(client.connectedAt).toLocaleTimeString('pt-BR') : '-'}
                     </td>
                   </tr>
                 ))}

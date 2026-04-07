@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
+import { useStore } from '../store/useStore';
+import { LogOut, X } from 'lucide-react';
 
 // Tela do cliente - Esta é a tela que aparece no PC quando ele está conectado como cliente
 // Em produção, isso seria uma aplicação Electron separada
@@ -24,6 +26,7 @@ const CLIENT_CONFIG_KEY = 'lhg-client-config';
 
 const ClientView: React.FC = () => {
   const { settings } = useSettingsStore();
+  const { users, customers, sessions, endSessionSavingTime } = useStore();
   const [config, setConfig] = useState<ClientConfig | null>(null);
   const [state, setState] = useState<ClientState>({
     isConnected: false,
@@ -39,6 +42,238 @@ const ClientView: React.FC = () => {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [setupData, setSetupData] = useState<ClientConfig>({ serverIp: '', stationNumber: '' });
   const wallpaperToUse = settings.clientWallpaper;
+
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [exitUsername, setExitUsername] = useState('');
+  const [exitPassword, setExitPassword] = useState('');
+  const [exitError, setExitError] = useState('');
+
+  // Estados do modal de encerrar sessão (pelo próprio cliente)
+  const [showEndSessionModal, setShowEndSessionModal] = useState(false);
+  const [endSessionUsername, setEndSessionUsername] = useState('');
+  const [endSessionPassword, setEndSessionPassword] = useState('');
+  const [endSessionError, setEndSessionError] = useState('');
+  const [endSessionSuccess, setEndSessionSuccess] = useState<string | null>(null);
+
+  const handleExitAttempt = () => {
+    const user = users.find(u => u.username === exitUsername && u.password === exitPassword);
+    if (user && (user.role === 'admin' || user.role === 'employee')) {
+       // @ts-ignore
+       if (window.lhgSystem?.quitApp) {
+          // @ts-ignore
+          window.lhgSystem.quitApp();
+       } else {
+          alert('Saindo do app...');
+       }
+    } else {
+       setExitError('Usuário ou senha incorretos, ou sem permissão.');
+    }
+  };
+
+  // Encerrar sessão pelo próprio cliente
+  const handleEndSessionAttempt = () => {
+    setEndSessionError('');
+    setEndSessionSuccess(null);
+
+    if (!state.sessionId) {
+      setEndSessionError('Nenhuma sessão ativa encontrada.');
+      return;
+    }
+
+    // Encontrar a sessão ativa no store
+    const activeSession = sessions.find(s => s.id === state.sessionId);
+
+    if (activeSession?.customerId) {
+      // Sessão vinculada a um cliente cadastrado: validar credenciais
+      const customer = customers.find(
+        c => c.id === activeSession.customerId &&
+             c.username === endSessionUsername &&
+             c.password === endSessionPassword
+      );
+      if (!customer) {
+        setEndSessionError('Usuário ou senha do cliente incorretos.');
+        return;
+      }
+      // Calcular tempo já usado em segundos
+      const initialDurationSeconds = (activeSession.duration ?? 0) * 60;
+      const elapsedSeconds = initialDurationSeconds - state.timeRemaining;
+      const remainingMinutes = Math.floor(state.timeRemaining / 60);
+
+      endSessionSavingTime(state.sessionId, elapsedSeconds);
+
+      const msg = remainingMinutes > 0
+        ? `Sessão encerrada! ${remainingMinutes} minuto(s) foram salvos na sua conta.`
+        : 'Sessão encerrada! Sem tempo restante para salvar.';
+      setEndSessionSuccess(msg);
+
+      setTimeout(() => {
+        setShowEndSessionModal(false);
+        setState(prev => ({ ...prev, isLocked: true, sessionId: null, sessionStartTime: null, timeRemaining: 0 }));
+      }, 2500);
+    } else {
+      // Sessão sem cliente cadastrado: encerra direto sem precisar de senha
+      endSessionSavingTime(state.sessionId, (activeSession?.duration ?? 0) * 60 - state.timeRemaining);
+      setShowEndSessionModal(false);
+      setState(prev => ({ ...prev, isLocked: true, sessionId: null, sessionStartTime: null, timeRemaining: 0 }));
+    }
+  };
+
+  // Verificar se a sessão ativa tem cliente cadastrado
+  const activeSession = state.sessionId ? sessions.find(s => s.id === state.sessionId) : null;
+  const sessionHasRegisteredCustomer = !!(activeSession?.customerId);
+
+  // UI de encerrar sessão (botão visível ao cliente na tela ativa)
+  const endSessionUI = (
+    <>
+      <button
+        onClick={() => {
+          setEndSessionUsername('');
+          setEndSessionPassword('');
+          setEndSessionError('');
+          setEndSessionSuccess(null);
+          setShowEndSessionModal(true);
+        }}
+        className="fixed bottom-16 right-4 bg-orange-500/80 hover:bg-orange-600 text-white px-4 py-2 rounded-full backdrop-blur-sm transition-all z-40 text-sm font-medium shadow-lg"
+        title="Encerrar minha sessão"
+      >
+        ⏹ Encerrar Sessão
+      </button>
+
+      {showEndSessionModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden text-left">
+            <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
+              <h3 className="font-semibold text-gray-800">Encerrar Sessão</h3>
+              <button onClick={() => setShowEndSessionModal(false)} className="text-gray-500 hover:text-gray-700">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6">
+              {endSessionSuccess ? (
+                <div className="text-center">
+                  <div className="text-5xl mb-3">✅</div>
+                  <p className="text-green-700 font-medium">{endSessionSuccess}</p>
+                </div>
+              ) : (
+                <>
+                  {sessionHasRegisteredCustomer ? (
+                    <>
+                      <p className="text-sm text-gray-600 mb-4">
+                        Esta sessão está vinculada a uma conta. Insira suas credenciais para encerrar e <strong>salvar o tempo restante</strong>.
+                      </p>
+                      {endSessionError && <p className="text-red-500 text-sm mb-3">{endSessionError}</p>}
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Usuário</label>
+                          <input
+                            type="text"
+                            value={endSessionUsername}
+                            onChange={(e) => setEndSessionUsername(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-400 outline-none text-black"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+                          <input
+                            type="password"
+                            value={endSessionPassword}
+                            onChange={(e) => setEndSessionPassword(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleEndSessionAttempt(); }}
+                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-400 outline-none text-black"
+                          />
+                        </div>
+                        <button
+                          onClick={handleEndSessionAttempt}
+                          className="w-full py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors"
+                        >
+                          Confirmar e Salvar Tempo
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-gray-600 mb-4">
+                        Esta sessão não está vinculada a nenhuma conta. O tempo restante não será salvo.
+                      </p>
+                      <button
+                        onClick={handleEndSessionAttempt}
+                        className="w-full py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-colors"
+                      >
+                        Encerrar Sessão
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const exitUI = (
+    <>
+      <button 
+        onClick={() => {
+          setExitUsername('');
+          setExitPassword('');
+          setExitError('');
+          setShowExitModal(true);
+        }}
+        className="fixed bottom-4 right-4 bg-white/10 hover:bg-red-500/80 text-white/50 hover:text-white p-3 rounded-full backdrop-blur-sm transition-all z-40"
+        title="Sair do Cliente"
+      >
+        <LogOut size={24} />
+      </button>
+
+      {showExitModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden text-left">
+            <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
+              <h3 className="font-semibold text-gray-800">Sair do Cliente</h3>
+              <button 
+                onClick={() => setShowExitModal(false)} 
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6">
+              {exitError && <p className="text-red-500 text-sm mb-4">{exitError}</p>}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Usuário</label>
+                  <input
+                    type="text"
+                    value={exitUsername}
+                    onChange={(e) => setExitUsername(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-black"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+                  <input
+                    type="password"
+                    value={exitPassword}
+                    onChange={(e) => setExitPassword(e.target.value)}
+                    onKeyDown={(e) => { if(e.key === 'Enter') handleExitAttempt(); }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-black"
+                  />
+                </div>
+                <button
+                  onClick={handleExitAttempt}
+                  className="w-full py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+                >
+                  Confirmar Saída
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 
   // Carregar configuração inicial (primeira execução)
   useEffect(() => {
@@ -277,6 +512,8 @@ const ClientView: React.FC = () => {
             📢 {state.message}
           </div>
         )}
+
+        {exitUI}
       </div>
     );
   }
@@ -359,6 +596,11 @@ const ClientView: React.FC = () => {
           <span>Para suporte, fale com o atendente</span>
         </div>
       </div>
+
+      {/* Botão de encerrar sessão (visivel ao cliente) */}
+      {state.sessionId && endSessionUI}
+
+      {exitUI}
     </div>
   );
 };
