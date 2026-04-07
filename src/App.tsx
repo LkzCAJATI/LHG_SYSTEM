@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { useStore } from './store/useStore';
+import { useNetworkStore } from './store/networkStore';
 import { Login } from './components/Login';
 import { Layout } from './components/Layout';
 import { Cashier } from './components/Cashier';
@@ -21,7 +23,14 @@ function App({ installMode = 'server' }: AppProps) {
     return <ClientView />;
   }
 
+  const { initializeIpc } = useNetworkStore();
   const { currentUser, currentPage } = useStore();
+
+  useEffect(() => {
+    if (installMode === 'server') {
+      initializeIpc();
+    }
+  }, [installMode, initializeIpc]);
 
   if (!currentUser) {
     return <Login />;

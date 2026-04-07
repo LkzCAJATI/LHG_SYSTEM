@@ -457,8 +457,10 @@ export const useStore = create<AppState>()(
           if (item.type === 'time' && item.deviceId) {
             const device = get().devices.find(d => d.id === item.deviceId);
             if (device && device.type === 'pc') {
-              // Liberar PC via rede (simulado)
-              get().updateDevice(item.deviceId, { status: 'in_use' });
+              // startSession args: deviceId, customerName, duration(horas), extraControllers, customerId
+              // item.quantity é a duração da sessão (horas se unitário, ou minutos se formatado - vamos assumir que time é sempre 1 no carrinho e preço cobre tudo, mas duration precisa ser calculada)
+              // Usaremos o customer se houver, mas como createSale ñ tem customer name, usamos 'Cliente Avulso'
+              get().startSession(item.deviceId, 'Cliente Avulso', item.quantity, 0);
             }
           }
         });
@@ -674,7 +676,7 @@ export const useStore = create<AppState>()(
           if (item.type === 'time' && item.deviceId) {
             const device = get().devices.find(d => d.id === item.deviceId);
             if (device && device.type === 'pc') {
-              get().updateDevice(item.deviceId, { status: 'in_use' });
+              get().startSession(item.deviceId, 'Cliente Avulso', item.quantity, 0);
             }
           }
         });

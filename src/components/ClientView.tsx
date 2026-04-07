@@ -48,6 +48,21 @@ const ClientView: React.FC = () => {
   const [exitPassword, setExitPassword] = useState('');
   const [exitError, setExitError] = useState('');
 
+  // Estados das configurações de IP (Admin)
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsLoginStep, setSettingsLoginStep] = useState<'login' | 'config'>('login');
+  const [settingsUsername, setSettingsUsername] = useState('');
+  const [settingsPassword, setSettingsPassword] = useState('');
+  const [settingsError, setSettingsError] = useState('');
+
+  // Estados do Login de Cliente
+  const [activeTab, setActiveTab] = useState<'status' | 'login'>('status');
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const socketRef = React.useRef<WebSocket | null>(null);
+
   // Estados do modal de encerrar sessão (pelo próprio cliente)
   const [showEndSessionModal, setShowEndSessionModal] = useState(false);
   const [endSessionUsername, setEndSessionUsername] = useState('');
@@ -95,11 +110,9 @@ const ClientView: React.FC = () => {
         return;
       }
       // Calcular tempo já usado em segundos
-      const initialDurationSeconds = (activeSession.duration ?? 0) * 60;
-      const elapsedSeconds = initialDurationSeconds - state.timeRemaining;
       const remainingMinutes = Math.floor(state.timeRemaining / 60);
 
-      endSessionSavingTime(state.sessionId, elapsedSeconds);
+      endSessionSavingTime(state.sessionId);
 
       const msg = remainingMinutes > 0
         ? `Sessão encerrada! ${remainingMinutes} minuto(s) foram salvos na sua conta.`
@@ -112,7 +125,7 @@ const ClientView: React.FC = () => {
       }, 2500);
     } else {
       // Sessão sem cliente cadastrado: encerra direto sem precisar de senha
-      endSessionSavingTime(state.sessionId, (activeSession?.duration ?? 0) * 60 - state.timeRemaining);
+      endSessionSavingTime(state.sessionId);
       setShowEndSessionModal(false);
       setState(prev => ({ ...prev, isLocked: true, sessionId: null, sessionStartTime: null, timeRemaining: 0 }));
     }
@@ -300,33 +313,88 @@ const ClientView: React.FC = () => {
     localStorage.removeItem('lhg-client-wallpaper');
   }, []);
 
-  // Simular conexão com o servidor quando já configurado
+  // Conexão WebSocket Real
   useEffect(() => {
     if (!config) return;
-    setConnectionError(null);
 
-    // Em produção, isso seria uma conexão WebSocket real
-    const timeout = setTimeout(() => {
-      setState(prev => ({ ...prev, isConnected: true }));
-    }, 1000);
+    let heartbeatInterval: any;
+    let reconnectTimeout: any;
 
-    return () => clearTimeout(timeout);
-  }, [config]);
-
-  useEffect(() => {
-    // Listener para mensagens do servidor (simulado)
-    const messageHandler = (event: MessageEvent) => {
+    const connect = () => {
+      setConnectionError(null);
+      // O IP vem da configuração salva pelo usuário na primeira vez
+      const wsUrl = `ws://${config.serverIp}:8080`;
+      
       try {
-        const data = JSON.parse(event.data);
-        handleServerMessage(data);
-      } catch {
-        // Ignorar mensagens inválidas
+        const socket = new WebSocket(wsUrl);
+        socketRef.current = socket;
+
+        socket.onopen = () => {
+          console.log('Conectado ao servidor!');
+          setState(prev => ({ ...prev, isConnected: true }));
+          
+          // Registrar este dispositivo no servidor
+          socket?.send(JSON.stringify({
+            type: 'register',
+            deviceId: `pc-${config.stationNumber.padStart(2, '0')}`,
+            deviceName: `PC ${config.stationNumber}`
+          }));
+
+          // Iniciar batimento cardíaco (heartbeat)
+          heartbeatInterval = setInterval(() => {
+            if (socket?.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({
+                type: 'heartbeat',
+                deviceId: `pc-${config.stationNumber.padStart(2, '0')}`
+              }));
+            }
+          }, 10000);
+        };
+
+        socket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'login_response') {
+              setIsLoggingIn(false);
+              if (data.success) {
+                setLoginError('');
+                setLoginUsername('');
+                setLoginPassword('');
+              } else {
+                setLoginError(data.message || 'Erro ao realizar login.');
+              }
+            } else {
+              handleServerMessage(data);
+            }
+          } catch (e) {
+            console.error('Erro Mensagem:', e);
+          }
+        };
+
+        socket.onclose = () => {
+          setState(prev => ({ ...prev, isConnected: false }));
+          clearInterval(heartbeatInterval);
+          reconnectTimeout = setTimeout(connect, 5000);
+        };
+
+        socket.onerror = () => {
+          socket?.close();
+        };
+      } catch (err) {
+        console.error('Erro ao criar WebSocket:', err);
+        reconnectTimeout = setTimeout(connect, 5000);
       }
     };
 
-    window.addEventListener('message', messageHandler);
-    return () => window.removeEventListener('message', messageHandler);
-  }, []);
+    connect();
+
+    return () => {
+      socketRef.current?.close();
+      socketRef.current = null;
+      clearInterval(heartbeatInterval);
+      clearTimeout(reconnectTimeout);
+    };
+  }, [config]);
 
   // Atualizar tempo restante
   useEffect(() => {
@@ -402,6 +470,48 @@ const ClientView: React.FC = () => {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const handleAdminSettingsLogin = () => {
+    setSettingsError('');
+    const user = users.find(u => u.username === settingsUsername && u.password === settingsPassword);
+    
+    // Senha local de emergência se não houver usuários sincronizados
+    const isMasterPassword = settingsUsername === 'admin' && settingsPassword === 'lhgmaster';
+
+    if ((user && (user.role === 'admin' || user.role === 'employee')) || isMasterPassword) {
+      setSettingsLoginStep('config');
+    } else {
+      setSettingsError('Credenciais administrativas incorretas.');
+    }
+  };
+
+  const handleCustomerLogin = () => {
+    if (!state.isConnected) {
+      setLoginError('Não foi possível conectar ao servidor.');
+      return;
+    }
+    if (!loginUsername || !loginPassword) {
+      setLoginError('Preencha todos os campos.');
+      return;
+    }
+
+    setLoginError('');
+    setIsLoggingIn(true);
+
+    // Enviar via WebSocket para o servidor validar
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({
+        type: 'login_request',
+        deviceId: `pc-${config?.stationNumber.padStart(2, '0')}`,
+        username: loginUsername,
+        password: loginPassword
+      }));
+    } else {
+      setIsLoggingIn(false);
+      setLoginError('Sem conexão com o servidor.');
+    }
+  };
+
   const handleSetupSave = () => {
     const serverIp = setupData.serverIp.trim();
     const stationNumber = setupData.stationNumber.trim();
@@ -465,8 +575,8 @@ const ClientView: React.FC = () => {
     );
   }
 
-  // Cliente sempre inicia bloqueado e só libera por comando do servidor
-  if (state.isLocked) {
+  // Cliente sempre inicia bloqueado e só libera por comando do servidor (ou quando pausado)
+  if (state.isLocked || state.isPaused) {
     const wallpaperStyle = wallpaperToUse 
       ? { backgroundImage: `url(${wallpaperToUse})`, backgroundSize: 'cover', backgroundPosition: 'center' }
       : {};
@@ -481,17 +591,92 @@ const ClientView: React.FC = () => {
         )}
         <div className="relative z-10 bg-black/60 backdrop-blur-md rounded-2xl p-8">
           <div className="text-center">
-            <div className="text-8xl mb-8">🔒</div>
-            <h1 className="text-4xl font-bold text-white mb-4">Computador Bloqueado</h1>
-            <p className="text-purple-200 text-xl mb-8">
-              {!state.isConnected
-                ? 'Conectando ao servidor...'
-                : state.timeRemaining <= 0
-                  ? 'Seu tempo acabou! Fale com o atendente para continuar.'
-                  : 'Aguarde a liberação do atendente.'}
-            </p>
+            <div className="flex justify-center mb-6">
+              <div className="bg-white/10 p-1 rounded-xl flex gap-1">
+                <button
+                  onClick={() => setActiveTab('status')}
+                  className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+                    activeTab === 'status' ? 'bg-white text-purple-900' : 'text-white/60 hover:text-white'
+                  }`}
+                >
+                  Status
+                </button>
+                <button
+                  onClick={() => setActiveTab('login')}
+                  className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+                    activeTab === 'login' ? 'bg-white text-purple-900' : 'text-white/60 hover:text-white'
+                  }`}
+                >
+                  Login de Conta
+                </button>
+              </div>
+            </div>
 
-            <p className="text-purple-300 text-sm mb-4">
+            {activeTab === 'status' ? (
+              <>
+                <div className="text-8xl mb-8">{state.isPaused ? '⏸️' : '🔒'}</div>
+                <h1 className="text-4xl font-bold text-white mb-4">
+                  {state.isPaused ? 'Sessão Pausada' : 'Computador Bloqueado'}
+                </h1>
+                <p className="text-purple-200 text-xl mb-8">
+                  {!state.isConnected
+                    ? 'Conectando ao servidor...'
+                    : state.isPaused
+                      ? 'O seu tempo e a máquina foram pausados pelo atendente.'
+                      : state.timeRemaining <= 0
+                        ? 'Seu tempo acabou! Fale com o atendente para continuar.'
+                        : 'Aguarde a liberação do atendente.'}
+                </p>
+              </>
+            ) : (
+              <div className="w-full max-w-sm mx-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
+                <h2 className="text-2xl font-bold text-white mb-6 text-center">Entrar na sua Conta</h2>
+                <div className="space-y-4">
+                  {loginError && (
+                    <div className="bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-2 rounded-lg text-sm">
+                      {loginError}
+                    </div>
+                  )}
+                  <div className="text-left">
+                    <label className="block text-sm font-medium text-purple-200 mb-1 ml-1">Usuário / Login</label>
+                    <input
+                      type="text"
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-white/50 transition-all"
+                      placeholder="Nome de usuário"
+                    />
+                  </div>
+                  <div className="text-left">
+                    <label className="block text-sm font-medium text-purple-200 mb-1 ml-1">Senha</label>
+                    <input
+                      type="password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleCustomerLogin()}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-white/50 transition-all"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <button
+                    onClick={handleCustomerLogin}
+                    disabled={isLoggingIn}
+                    className={`w-full py-3 rounded-xl font-bold text-lg transition-all ${
+                      isLoggingIn 
+                        ? 'bg-white/20 text-white/50 cursor-not-allowed' 
+                        : 'bg-white text-purple-900 hover:bg-purple-50 hover:scale-[1.02] active:scale-[0.98]'
+                    }`}
+                  >
+                    {isLoggingIn ? 'Autenticando...' : 'Iniciar Sessão'}
+                  </button>
+                  <p className="text-white/40 text-xs text-center mt-4">
+                    Ao entrar, seu tempo disponível será consumido automaticamente nesta máquina.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <p className="text-purple-300 text-sm mt-8">
               Maquina {config.stationNumber} - Servidor {config.serverIp}
             </p>
             
@@ -589,16 +774,107 @@ const ClientView: React.FC = () => {
         </div>
       )}
 
-      {/* Footer */}
-      <div className="fixed bottom-0 left-0 right-0 bg-black/20 backdrop-blur-sm px-6 py-3">
-        <div className="flex items-center justify-between text-purple-200 text-sm">
-          <span>GameZone - Sistema de Gerenciamento de LAN House</span>
-          <span>Para suporte, fale com o atendente</span>
-        </div>
-      </div>
-
       {/* Botão de encerrar sessão (visivel ao cliente) */}
       {state.sessionId && endSessionUI}
+
+      {/* Botão de Configurações (Admin) */}
+      <button
+        onClick={() => {
+          setSettingsLoginStep('login');
+          setSettingsUsername('');
+          setSettingsPassword('');
+          setSettingsError('');
+          setShowSettingsModal(true);
+        }}
+        className="fixed bottom-4 left-4 bg-white/10 hover:bg-white/30 text-white/50 p-2 rounded-lg backdrop-blur-sm transition-all z-40"
+        title="Configurações do Servidor"
+      >
+        ⚙️
+      </button>
+
+      {/* Modal de Configurações Admin */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden text-left">
+            <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
+              <h3 className="font-semibold text-gray-800">Acesso Administrativo</h3>
+              <button onClick={() => setShowSettingsModal(false)} className="text-gray-500 hover:text-gray-700">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6">
+              {settingsLoginStep === 'login' ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-600">Autentique-se para alterar o IP ou número da máquina.</p>
+                  {settingsError && <p className="text-red-500 text-sm">{settingsError}</p>}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Usuário / Admin</label>
+                    <input
+                      type="text"
+                      value={settingsUsername}
+                      onChange={(e) => setSettingsUsername(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg outline-none text-black"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+                    <input
+                      type="password"
+                      value={settingsPassword}
+                      onChange={(e) => setSettingsPassword(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAdminSettingsLogin()}
+                      className="w-full px-3 py-2 border rounded-lg outline-none text-black"
+                    />
+                  </div>
+                  <button
+                    onClick={handleAdminSettingsLogin}
+                    className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors"
+                  >
+                    Entrar
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">IP do Servidor</label>
+                    <input
+                      type="text"
+                      defaultValue={config?.serverIp}
+                      id="new-ip"
+                      className="w-full px-3 py-2 border rounded-lg outline-none text-black"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Número da Máquina</label>
+                    <input
+                      type="text"
+                      defaultValue={config?.stationNumber}
+                      id="new-station"
+                      className="w-full px-3 py-2 border rounded-lg outline-none text-black"
+                    />
+                  </div>
+                  <button
+                    onClick={() => {
+                      const ip = (document.getElementById('new-ip') as HTMLInputElement).value;
+                      const station = (document.getElementById('new-station') as HTMLInputElement).value;
+                      setSetupData({ serverIp: ip, stationNumber: station });
+                      setShowSettingsModal(false);
+                      // handleSetupSave vai ser chamado via efeito colateral ou manualmente
+                      const newConfig: ClientConfig = { serverIp: ip, stationNumber: station };
+                      localStorage.setItem(CLIENT_CONFIG_KEY, JSON.stringify(newConfig));
+                      // Forçar recarga para aplicar novo IP
+                      window.location.reload();
+                    }}
+                    className="w-full py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+                  >
+                    Salvar e Reiniciar
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {exitUI}
     </div>

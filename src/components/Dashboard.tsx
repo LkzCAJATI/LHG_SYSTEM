@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 
 export function Dashboard() {
-  const { devices, updateDevice, addDevice, endSession } = useStore();
+  const { devices, updateDevice, addDevice, endSessionSavingTime, pauseSession, resumeSession } = useStore();
   const { 
     isServerRunning, 
     connectedClients,
@@ -17,7 +17,11 @@ export function Dashboard() {
     shutdownDevice,
     restartDevice,
     isDeviceConnected,
+    startServer,
+    stopServer
   } = useNetworkStore();
+  
+  const [isScanning, setIsScanning] = useState(false);
   
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [showAddDevice, setShowAddDevice] = useState(false);
@@ -36,8 +40,10 @@ export function Dashboard() {
     const interval = setInterval(() => {
       const times: Record<string, string> = {};
       devices.forEach(device => {
-        if (device.status === 'in_use' && device.currentSession?.startTime) {
-          const diff = Date.now() - new Date(device.currentSession.startTime).getTime();
+        if ((device.status === 'in_use' || device.status === 'paused') && device.currentSession?.startTime) {
+          const session = device.currentSession;
+          const nowMs = session.isPaused && session.pausedAt ? new Date(session.pausedAt).getTime() : Date.now();
+          const diff = Math.max(0, nowMs - new Date(session.startTime).getTime() - (session.totalPausedTime || 0));
           const hours = Math.floor(diff / 3600000);
           const minutes = Math.floor((diff % 3600000) / 60000);
           const seconds = Math.floor((diff % 60000) / 1000);
@@ -64,6 +70,8 @@ export function Dashboard() {
         return 'bg-green-100 text-green-700 border-green-200';
       case 'in_use':
         return 'bg-purple-100 text-purple-700 border-purple-200';
+      case 'paused':
+        return 'bg-orange-100 text-orange-700 border-orange-200';
       case 'maintenance':
         return 'bg-yellow-100 text-yellow-700 border-yellow-200';
       default:
@@ -75,6 +83,7 @@ export function Dashboard() {
     switch (status) {
       case 'available': return 'Disponível';
       case 'in_use': return 'Em Uso';
+      case 'paused': return 'Pausado';
       case 'maintenance': return 'Manutenção';
       default: return status;
     }
@@ -97,7 +106,7 @@ export function Dashboard() {
   const handleEndSession = (deviceId: string) => {
     const device = devices.find(d => d.id === deviceId);
     if (device?.currentSession) {
-      endSession(device.currentSession.id);
+      endSessionSavingTime(device.currentSession.id);
     }
   };
 
@@ -143,16 +152,45 @@ export function Dashboard() {
           {/* Status do servidor */}
           <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg shadow">
             <span className={`w-3 h-3 rounded-full ${isServerRunning ? 'bg-green-500' : 'bg-red-500'}`}></span>
-            <span className="text-sm text-gray-600">
+            <span className="text-sm font-medium text-gray-700">
               Servidor: {isServerRunning ? 'Online' : 'Offline'}
             </span>
+            <button
+              onClick={() => isServerRunning ? stopServer() : startServer()}
+              className={`ml-2 px-3 py-1 rounded text-xs font-bold transition-colors ${
+                isServerRunning 
+                  ? 'bg-red-100 text-red-700 hover:bg-red-200' 
+                  : 'bg-green-100 text-green-700 hover:bg-green-200'
+              }`}
+            >
+              {isServerRunning ? 'Desligar' : 'Ativar'}
+            </button>
           </div>
+
+          <button
+            onClick={() => {
+              setIsScanning(true);
+              setTimeout(() => setIsScanning(false), 1500); // refresh fake state
+            }}
+            disabled={!isServerRunning || isScanning}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+              isServerRunning && !isScanning
+                ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            <svg className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {isScanning ? 'Atualizando...' : 'Atualizar Rede'}
+          </button>
+
           <button
             onClick={() => setShowAddDevice(true)}
             className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
           >
-            <Plus className="w-5 h-5" />
-            Adicionar Dispositivo
+            <Plus className="w-4 h-4" />
+            Dispositivo
           </button>
         </div>
       </div>
@@ -235,6 +273,7 @@ export function Dashboard() {
               key={device.id}
               className={`bg-white rounded-xl shadow-lg overflow-hidden border-2 transition-all hover:shadow-xl cursor-pointer ${
                 device.status === 'in_use' ? 'border-purple-400' : 
+                device.status === 'paused' ? 'border-orange-400' : 
                 device.status === 'available' ? 'border-green-400' : 'border-yellow-400'
               }`}
               onClick={() => setSelectedDevice(device)}
@@ -242,6 +281,7 @@ export function Dashboard() {
               {/* Header do Card */}
               <div className={`p-4 ${
                 device.status === 'in_use' ? 'bg-purple-50' : 
+                device.status === 'paused' ? 'bg-orange-50' : 
                 device.status === 'available' ? 'bg-green-50' : 'bg-yellow-50'
               }`}>
                 <div className="flex items-center justify-between">
@@ -272,10 +312,10 @@ export function Dashboard() {
 
               {/* Conteúdo do Card */}
               <div className="p-4">
-                {device.status === 'in_use' && device.currentSession && (
+                {(device.status === 'in_use' || device.status === 'paused') && device.currentSession && (
                   <div className="mb-3">
                     <div className="text-xs text-gray-500 mb-1">Tempo de Uso</div>
-                    <div className="text-xl font-mono font-bold text-gray-800">
+                    <div className={`text-xl font-mono font-bold ${device.status === 'paused' ? 'text-orange-500 opacity-80' : 'text-gray-800'}`}>
                       {sessionTimes[device.id] || '00:00:00'}
                     </div>
                     {device.currentSession.customerName && (
@@ -299,17 +339,30 @@ export function Dashboard() {
 
                 {/* Botões de Ação */}
                 <div className="space-y-2">
-                  {device.status === 'in_use' && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEndSession(device.id);
-                      }}
-                      className="w-full flex items-center justify-center gap-2 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
-                    >
-                      <Square className="w-4 h-4" />
-                      Finalizar
-                    </button>
+                  {(device.status === 'in_use' || device.status === 'paused') && device.currentSession && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          device.status === 'in_use' ? pauseSession(device.currentSession!.id) : resumeSession(device.currentSession!.id);
+                        }}
+                        className={`flex-1 py-1 px-2 text-white rounded text-sm font-bold transition-colors ${
+                          device.status === 'in_use' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-500 hover:bg-green-600'
+                        }`}
+                      >
+                        {device.status === 'in_use' ? '⏸ Pausar' : '▶ Retomar'}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEndSession(device.id);
+                        }}
+                        className="flex-1 flex items-center justify-center gap-1 py-1 px-2 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-bold transition-colors"
+                      >
+                        <Square className="w-3 h-3" />
+                        Finalizar
+                      </button>
+                    </div>
                   )}
 
                   <button
@@ -583,7 +636,7 @@ export function Dashboard() {
       {connectedClients.length > 0 && (
         <div className="mt-8">
           <h2 className="text-lg font-bold text-gray-800 mb-4">
-            Clientes na Rede ({connectedClients.filter(c => c.status === 'connected').length})
+            Clientes na Rede ({connectedClients.length})
           </h2>
           <div className="bg-white rounded-xl shadow overflow-hidden">
             <table className="w-full">
@@ -602,14 +655,14 @@ export function Dashboard() {
                     <td className="px-4 py-3 text-gray-600">{client.ip}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 text-xs rounded-full ${
-                        client.status === 'connected' ? 'bg-green-100 text-green-700' :
+                        client.connected ? 'bg-green-100 text-green-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
-                        {client.status === 'connected' ? 'Conectado' : 'Desconectado'}
+                        {client.connected ? 'Conectado' : 'Desconectado'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600">
-                      {new Date(client.lastSeen).toLocaleTimeString('pt-BR')}
+                      {client.lastSeen ? new Date(client.lastSeen).toLocaleTimeString('pt-BR') : '-'}
                     </td>
                   </tr>
                 ))}

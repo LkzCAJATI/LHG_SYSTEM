@@ -1,11 +1,29 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNetworkStore } from '../store/networkStore';
 
 export default function Network() {
-  const { clients, connected, serverIP, serverPort, setServerConfig, toggleClient, shutdownClient, restartClient } = useNetworkStore();
+  const { 
+    clients, serverIP, serverPort, setServerConfig, toggleClient, 
+    shutdownClient, restartClient, scanNetwork, isScanning, 
+    detectedIp, detectIp, startServer, stopServer, isServerRunning, initializeIpc
+  } = useNetworkStore();
+  
   const [editIP, setEditIP] = useState(serverIP);
   const [editPort, setEditPort] = useState(serverPort.toString());
   const [showInstallGuide, setShowInstallGuide] = useState(false);
+
+  // Carregar IP e inicializar ao montar
+  useEffect(() => {
+    detectIp();
+    initializeIpc();
+  }, [detectIp, initializeIpc]);
+
+  // Sincronizar campo com IP detectado se vazio
+  useEffect(() => {
+    if (detectedIp && !editIP) {
+      setEditIP(detectedIp);
+    }
+  }, [detectedIp, editIP]);
 
   const handleSaveConfig = () => {
     setServerConfig(editIP, parseInt(editPort));
@@ -22,32 +40,47 @@ export default function Network() {
           <h1 className="text-2xl font-bold text-white">🖥️ Gerenciamento de Rede</h1>
           <p className="text-gray-400 mt-1">Controle remoto dos PCs da LAN</p>
         </div>
-        <button
-          onClick={() => setShowInstallGuide(!showInstallGuide)}
-          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
-        >
-          📖 Guia de Instalação
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => isServerRunning ? stopServer() : startServer()}
+            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+              isServerRunning 
+                ? 'bg-red-600/20 text-red-400 border border-red-900/50 hover:bg-red-600/30' 
+                : 'bg-green-600 text-white hover:bg-green-700 shadow-lg'
+            }`}
+          >
+            {isServerRunning ? '🛑 Parar Servidor' : '🚀 Iniciar Servidor'}
+          </button>
+          <button
+            onClick={() => setShowInstallGuide(!showInstallGuide)}
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors flex items-center gap-2"
+          >
+            📖 Guia
+          </button>
+        </div>
       </div>
 
       {/* Status de Conexão */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-gray-800/50 backdrop-blur rounded-xl p-4 border border-gray-700">
           <div className="flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+            <div className={`w-3 h-3 rounded-full ${isServerRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
             <span className="text-gray-400">Status WebSocket</span>
           </div>
-          <p className="text-xl font-bold text-white mt-2">{connected ? '🟢 Online' : '🔴 Offline'}</p>
+          <p className="text-xl font-bold text-white mt-2">{isServerRunning ? '🟢 Online' : '🔴 Offline'}</p>
+        </div>
+        
+        <div className="bg-gray-800/50 backdrop-blur rounded-xl p-4 border border-gray-700 relative overflow-hidden">
+          <span className="text-gray-400 font-medium">Seu IP na Rede</span>
+          <p className="text-xl font-bold text-white mt-2 font-mono">
+            {detectedIp || 'Procurando...'}
+          </p>
+          <div className="absolute -right-4 -bottom-4 text-white/5 text-6xl rotate-12">IP</div>
         </div>
         
         <div className="bg-gray-800/50 backdrop-blur rounded-xl p-4 border border-gray-700">
-          <span className="text-gray-400">IP do Servidor</span>
-          <p className="text-xl font-bold text-white mt-2">{serverIP}</p>
-        </div>
-        
-        <div className="bg-gray-800/50 backdrop-blur rounded-xl p-4 border border-gray-700">
-          <span className="text-gray-400">Porta</span>
-          <p className="text-xl font-bold text-white mt-2">{serverPort}</p>
+          <span className="text-gray-400">PCs com o app na LAN</span>
+          <p className="text-xl font-bold text-white mt-2">{clients.filter(c => c.connected).length}</p>
         </div>
       </div>
 
@@ -94,12 +127,23 @@ export default function Network() {
               className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-purple-500"
             />
           </div>
-          <div className="flex items-end">
+          <div className="flex items-end gap-3">
             <button
               onClick={handleSaveConfig}
-              className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+              className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium"
             >
-              💾 Salvar Configurações
+              💾 Salvar IP
+            </button>
+            <button
+              onClick={() => scanNetwork()}
+              disabled={isScanning}
+              className={`flex-1 px-4 py-2 border rounded-lg transition-all font-medium ${
+                isScanning 
+                  ? 'bg-purple-900/20 text-purple-400 border-purple-800 animate-pulse' 
+                  : 'bg-purple-600/10 text-purple-400 border-purple-900/50 hover:bg-purple-600 hover:text-white'
+              }`}
+            >
+              {isScanning ? '🔍 Buscando...' : '🔍 Varrer Rede'}
             </button>
           </div>
         </div>

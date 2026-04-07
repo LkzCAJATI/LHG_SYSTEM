@@ -1,10 +1,10 @@
 import { useStore } from "../store/useStore";
 import { useSettingsStore } from "../store/settingsStore";
 
-const SAVE_DEBOUNCE_MS = 1200;
+const SAVE_DEBOUNCE_MS = 500; // Reduzido de 1200 para 500ms
 
 function buildAppStateSnapshot() {
-  const state = useStore.getState() as Record<string, unknown>;
+  const state = useStore.getState() as unknown as Record<string, unknown>;
   return {
     users: state.users,
     devices: state.devices,
@@ -23,7 +23,7 @@ function buildAppStateSnapshot() {
 }
 
 function buildSettingsSnapshot() {
-  const state = useSettingsStore.getState() as { settings?: Record<string, unknown> };
+  const state = useSettingsStore.getState() as unknown as { settings?: Record<string, unknown> };
   return {
     settings: state.settings ?? {}
   };
@@ -56,6 +56,14 @@ export async function initExternalPersistence() {
     }, SAVE_DEBOUNCE_MS);
   };
 
+  const saveNow = () => {
+    if (timer) clearTimeout(timer);
+    void window.lhgSystem?.saveState({
+      appState: buildAppStateSnapshot(),
+      settingsState: buildSettingsSnapshot()
+    });
+  };
+
   // Migra estado atual (localStorage) para arquivo externo na primeira inicialização.
   if (!diskState) {
     await window.lhgSystem.saveState({
@@ -64,6 +72,18 @@ export async function initExternalPersistence() {
     });
   }
 
-  useStore.subscribe(scheduleSave);
+  let lastUser = useStore.getState().currentUser;
+
+  useStore.subscribe((state) => {
+    const isLogout = lastUser !== null && state.currentUser === null;
+    lastUser = state.currentUser;
+
+    if (isLogout) {
+      saveNow();
+    } else {
+      scheduleSave();
+    }
+  });
+
   useSettingsStore.subscribe(scheduleSave);
 }

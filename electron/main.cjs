@@ -1,9 +1,18 @@
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+// Garante que o caminho de dados seja o mesmo para dev e prod
+app.name = "LHG SYSTEM";
+
 const path = require("path");
 const { execFile } = require("child_process");
+const os = require("os");
+const net = require("net");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const { autoUpdater } = require("electron-updater");
+const { WebSocketServer } = require("ws");
+
+let wss = null;
+const connectedSockets = new Map(); // deviceId -> socket
 
 let allowClientQuit = false;
 const DATA_VERSION = 1;
@@ -107,6 +116,148 @@ function registerIpcHandlers() {
     allowClientQuit = true;
     app.quit();
   });
+
+  ipcMain.handle("lhg:network:command", async (_, { deviceId, command }) => {
+    const ws = connectedSockets.get(deviceId);
+    if (ws && ws.readyState === 1) { // 1 = OPEN
+      ws.send(JSON.stringify(command));
+      return { ok: true };
+    }
+    return { ok: false, error: "Dispositivo não encontrado ou offline" };
+  });
+
+  ipcMain.handle("lhg:network:ip", async () => {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name]) {
+        if (iface.family === "IPv4" && !iface.internal) {
+          return iface.address;
+        }
+      }
+    }
+    return "127.0.0.1";
+  });
+
+  ipcMain.handle("lhg:network:scan", async () => {
+    const interfaces = os.networkInterfaces();
+    let localIp = null;
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name]) {
+        if (iface.family === "IPv4" && !iface.internal) {
+          localIp = iface.address;
+          break;
+        }
+      }
+      if (localIp) break;
+    }
+
+    if (!localIp) return [];
+
+    const subnet = localIp.split(".").slice(0, 3).join(".");
+    const found = [];
+    const tasks = [];
+
+    // Tentar conectar na porta 8080 em toda a sub-rede /24
+    for (let i = 1; i < 255; i++) {
+      const ip = `${subnet}.${i}`;
+      if (ip === localIp) continue;
+
+      tasks.push(new Promise(resolve => {
+        const socket = new net.Socket();
+        socket.setTimeout(250); // Timeout rápido
+        socket.on("connect", () => {
+          found.push(ip);
+          socket.destroy();
+          resolve(true);
+        });
+        socket.on("error", () => resolve(false));
+        socket.on("timeout", () => {
+          socket.destroy();
+          resolve(false);
+        });
+        socket.connect(8080, ip);
+      }));
+    }
+
+    await Promise.all(tasks);
+    return found;
+  });
+
+  ipcMain.handle("lhg:network:get-server-status", () => {
+    return !!wss;
+  });
+
+  ipcMain.on("lhg:network:login-response", (_, { deviceId, success, message }) => {
+    const socket = connectedSockets.get(deviceId);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({
+        type: "login_response",
+        success,
+        message
+      }));
+    }
+  });
+}
+
+function setupNetworkServer(win) {
+  if (wss) return; // Já está rodando
+
+  try {
+    wss = new WebSocketServer({ port: 8080 });
+    
+    wss.on("connection", (ws, req) => {
+      const ip = req.socket.remoteAddress.replace(/^.*:/, "");
+      
+      ws.on("message", (data) => {
+        try {
+          const msg = JSON.parse(data);
+          if (msg.type === "register") {
+            connectedSockets.set(msg.deviceId, ws);
+            win.webContents.send("lhg:network:event", {
+              type: "client_connected",
+              deviceId: msg.deviceId,
+              ip: ip,
+              deviceName: msg.deviceName
+            });
+          }
+          if (msg.type === "login_request") {
+            // Repassar para o Renderer do Servidor validar
+            win.webContents.send("lhg:network:login-request", {
+              deviceId: msg.deviceId,
+              username: msg.username,
+              password: msg.password
+            });
+          }
+          if (msg.type === "heartbeat") {
+            win.webContents.send("lhg:network:event", {
+              type: "client_heartbeat",
+              deviceId: msg.deviceId,
+              lastSeen: new Date().toISOString()
+            });
+          }
+        } catch (e) {
+          console.error("Erro WebSocket Message:", e);
+        }
+      });
+
+      ws.on("close", () => {
+        for (const [id, socket] of connectedSockets.entries()) {
+          if (socket === ws) {
+            connectedSockets.delete(id);
+            win.webContents.send("lhg:network:event", {
+              type: "client_disconnected",
+              deviceId: id
+            });
+            break;
+          }
+        }
+      });
+    });
+
+    console.log("Servidor WebSocket rodando na porta 8080");
+  } catch (err) {
+    console.error("Falha ao iniciar Servidor WebSocket:", err);
+  }
 }
 
 function getInstallMode() {
@@ -174,6 +325,10 @@ async function createWindow() {
   win.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
     query: { installMode }
   });
+
+  if (installMode === "server") {
+    setupNetworkServer(win);
+  }
 }
 
 function setupAutoUpdater() {
