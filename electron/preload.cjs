@@ -21,5 +21,6 @@ contextBridge.exposeInMainWorld("lhgSystem", {
     ipcRenderer.on("lhg:network:login-request", subscription);
     return () => ipcRenderer.removeListener("lhg:network:login-request", subscription);
   },
-  sendLoginResponse: (data) => ipcRenderer.send("lhg:network:login-response", data)
+  sendLoginResponse: (data) => ipcRenderer.send("lhg:network:login-response", data),
+  broadcastWallpaper: (data) => ipcRenderer.send("lhg:network:broadcast-wallpaper", data)
 });

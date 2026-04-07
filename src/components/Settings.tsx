@@ -11,13 +11,18 @@ export default function Settings() {
 
   const handleImageUpload = (
     e: React.ChangeEvent<HTMLInputElement>,
-    setter: (value: string | null) => void
+    setter: (value: string | null) => void,
+    isClientWallpaper: boolean = false
   ) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setter(reader.result as string);
+        const result = reader.result as string;
+        setter(result);
+        if (isClientWallpaper && window.lhgSystem?.broadcastWallpaper) {
+          window.lhgSystem.broadcastWallpaper({ url: result });
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -187,7 +192,7 @@ export default function Settings() {
                     type="file"
                     ref={wallpaperInputRef}
                     accept="image/*"
-                    onChange={(e) => handleImageUpload(e, setClientWallpaper)}
+                    onChange={(e) => handleImageUpload(e, setClientWallpaper, true)}
                     className="hidden"
                   />
                   <button
@@ -198,7 +203,12 @@ export default function Settings() {
                   </button>
                   {settings.clientWallpaper && (
                     <button
-                      onClick={() => setClientWallpaper(null)}
+                      onClick={() => {
+                        setClientWallpaper(null);
+                        if (window.lhgSystem?.broadcastWallpaper) {
+                          window.lhgSystem.broadcastWallpaper({ url: '' });
+                        }
+                      }}
                       className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
                     >
                       🗑️ Remover

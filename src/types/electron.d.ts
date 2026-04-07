@@ -23,6 +23,7 @@ declare global {
       getServerStatus: () => Promise<boolean>;
       onLoginRequest: (callback: (data: any) => void) => () => void;
       sendLoginResponse: (data: { deviceId: string; success: boolean; message?: string }) => void;
+      broadcastWallpaper: (data: { url: string }) => void;
     };
   }
 }

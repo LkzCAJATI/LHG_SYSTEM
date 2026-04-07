@@ -187,6 +187,17 @@ function registerIpcHandlers() {
     return !!wss;
   });
 
+  ipcMain.on("lhg:network:broadcast-wallpaper", (_, { url }) => {
+    connectedSockets.forEach((socket) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: "wallpaper_update",
+          url
+        }));
+      }
+    });
+  });
+
   ipcMain.on("lhg:network:login-response", (_, { deviceId, success, message }) => {
     const socket = connectedSockets.get(deviceId);
     if (socket && socket.readyState === WebSocket.OPEN) {

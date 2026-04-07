@@ -62,6 +62,7 @@ const ClientView: React.FC = () => {
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const socketRef = React.useRef<WebSocket | null>(null);
+  const [currentWallpaper, setCurrentWallpaper] = useState<string | null>(null);
 
   // Estados do modal de encerrar sessão (pelo próprio cliente)
   const [showEndSessionModal, setShowEndSessionModal] = useState(false);
@@ -363,6 +364,8 @@ const ClientView: React.FC = () => {
               } else {
                 setLoginError(data.message || 'Erro ao realizar login.');
               }
+            } else if (data.type === 'wallpaper_update') {
+              setCurrentWallpaper(data.url || null);
             } else {
               handleServerMessage(data);
             }
@@ -659,117 +662,125 @@ const ClientView: React.FC = () => {
 
   // Cliente sempre inicia bloqueado e só libera por comando do servidor (ou quando pausado)
   if (state.isLocked || state.isPaused) {
-    const wallpaperStyle = wallpaperToUse 
-      ? { backgroundImage: `url(${wallpaperToUse})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    const wallpaperToDisplay = currentWallpaper || wallpaperToUse;
+    const wallpaperStyle = wallpaperToDisplay 
+      ? { backgroundImage: `url(${wallpaperToDisplay})`, backgroundSize: 'cover', backgroundPosition: 'center' }
       : {};
 
     return (
       <div 
-        className="min-h-screen flex items-center justify-center relative"
-        style={wallpaperToUse ? wallpaperStyle : {}} 
+        className="min-h-screen flex items-center justify-center relative overflow-hidden"
+        style={wallpaperToDisplay ? wallpaperStyle : {}} 
       >
-        {!wallpaperToUse && (
+        {!wallpaperToDisplay && (
           <div className="absolute inset-0 bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900" />
         )}
-        <div className="relative z-10 bg-black/60 backdrop-blur-md rounded-2xl p-8">
-          <div className="text-center">
-            <div className="flex justify-center mb-6">
-              <div className="bg-white/10 p-1 rounded-xl flex gap-1">
-                <button
-                  onClick={() => setActiveTab('status')}
-                  className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                    activeTab === 'status' ? 'bg-white text-purple-900' : 'text-white/60 hover:text-white'
-                  }`}
-                >
-                  Status
-                </button>
-                <button
-                  onClick={() => setActiveTab('login')}
-                  className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                    activeTab === 'login' ? 'bg-white text-purple-900' : 'text-white/60 hover:text-white'
-                  }`}
-                >
-                  Login de Conta
-                </button>
+        <div className="relative z-10 w-full max-w-lg mx-4">
+          <div className="bg-black/40 backdrop-blur-xl rounded-3xl p-10 border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+            <div className="text-center">
+              {/* Header com Logo do Sistema se disponível */}
+              <div className="flex flex-col items-center mb-8">
+                {settings.logo ? (
+                  <img src={settings.logo} alt="Logo" className="h-16 w-auto mb-4 drop-shadow-lg" />
+                ) : (
+                  <div className="text-6xl mb-4 drop-shadow-md">🎮</div>
+                )}
+                <h2 className="text-2xl font-bold text-white tracking-wider">
+                  {settings.systemName || 'LHG SYSTEM'}
+                </h2>
               </div>
-            </div>
 
-            {activeTab === 'status' ? (
-              <>
-                <div className="text-8xl mb-8">{state.isPaused ? '⏸️' : '🔒'}</div>
-                <h1 className="text-4xl font-bold text-white mb-4">
-                  {state.isPaused ? 'Sessão Pausada' : 'Computador Bloqueado'}
-                </h1>
-                <p className="text-purple-200 text-xl mb-8">
-                  {!state.isConnected
-                    ? 'Conectando ao servidor...'
-                    : state.isPaused
-                      ? 'O seu tempo e a máquina foram pausados pelo atendente.'
-                      : state.timeRemaining <= 0
-                        ? 'Seu tempo acabou! Fale com o atendente para continuar.'
-                        : 'Aguarde a liberação do atendente.'}
-                </p>
-              </>
-            ) : (
-              <div className="w-full max-w-sm mx-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
-                <h2 className="text-2xl font-bold text-white mb-6 text-center">Entrar na sua Conta</h2>
-                <div className="space-y-4">
-                  {loginError && (
-                    <div className="bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-2 rounded-lg text-sm">
-                      {loginError}
-                    </div>
-                  )}
-                  <div className="text-left">
-                    <label className="block text-sm font-medium text-purple-200 mb-1 ml-1">Usuário / Login</label>
-                    <input
-                      type="text"
-                      value={loginUsername}
-                      onChange={(e) => setLoginUsername(e.target.value)}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-white/50 transition-all"
-                      placeholder="Nome de usuário"
-                    />
-                  </div>
-                  <div className="text-left">
-                    <label className="block text-sm font-medium text-purple-200 mb-1 ml-1">Senha</label>
-                    <input
-                      type="password"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleCustomerLogin()}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-white/50 transition-all"
-                      placeholder="••••••••"
-                    />
-                  </div>
+              {/* Tabs Switcher */}
+              <div className="flex justify-center mb-10">
+                <div className="bg-white/10 p-1.5 rounded-2xl flex gap-1 w-full max-w-xs">
                   <button
-                    onClick={handleCustomerLogin}
-                    disabled={isLoggingIn}
-                    className={`w-full py-3 rounded-xl font-bold text-lg transition-all ${
-                      isLoggingIn 
-                        ? 'bg-white/20 text-white/50 cursor-not-allowed' 
-                        : 'bg-white text-purple-900 hover:bg-purple-50 hover:scale-[1.02] active:scale-[0.98]'
+                    onClick={() => setActiveTab('status')}
+                    className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                      activeTab === 'status' ? 'bg-white text-purple-900 shadow-lg' : 'text-white/60 hover:text-white'
                     }`}
                   >
-                    {isLoggingIn ? 'Autenticando...' : 'Iniciar Sessão'}
+                    STATUS
                   </button>
-                  <p className="text-white/40 text-xs text-center mt-4">
-                    Ao entrar, seu tempo disponível será consumido automaticamente nesta máquina.
+                  <button
+                    onClick={() => setActiveTab('login')}
+                    className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                      activeTab === 'login' ? 'bg-white text-purple-900 shadow-lg' : 'text-white/60 hover:text-white'
+                    }`}
+                  >
+                    LOGIN
+                  </button>
+                </div>
+              </div>
+
+              {activeTab === 'status' ? (
+                <div className="animate-in fade-in duration-500">
+                  <div className="text-6xl mb-6">{state.isPaused ? '⏸️' : '🔒'}</div>
+                  <h1 className="text-3xl font-bold text-white mb-4">
+                    {state.isPaused ? 'Sessão Pausada' : 'PC Bloqueado'}
+                  </h1>
+                  <p className="text-purple-100 text-lg mb-8 leading-relaxed">
+                    {!state.isConnected
+                      ? 'Conectando ao sistema...'
+                      : state.isPaused
+                        ? 'O seu tempo e a máquina foram pausados.'
+                        : state.timeRemaining <= 0
+                          ? 'Tempo esgotado! Recarregue no balcão.'
+                          : 'Aguarde a liberação do atendente.'}
                   </p>
                 </div>
-              </div>
-            )}
-
-            <p className="text-purple-300 text-sm mt-8">
-              Maquina {config.stationNumber} - Servidor {config.serverIp}
-            </p>
-            
-            {state.timeRemaining > 0 && (
-              <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 inline-block">
-                <div className="text-purple-200 text-sm mb-2">Tempo Restante</div>
-                <div className="text-5xl font-mono font-bold text-white">
-                  {formatTime(state.timeRemaining)}
+              ) : (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="space-y-6">
+                    {loginError && (
+                      <div className="bg-red-500/30 border border-red-500/50 text-red-100 px-4 py-3 rounded-2xl text-sm backdrop-blur-sm">
+                        ⚠️ {loginError}
+                      </div>
+                    )}
+                    <div className="text-left">
+                      <label className="block text-xs font-bold text-purple-300 uppercase tracking-widest mb-2 ml-1">Usuário</label>
+                      <input
+                        type="text"
+                        value={loginUsername}
+                        onChange={(e) => setLoginUsername(e.target.value)}
+                        className="w-full px-5 py-4 bg-white/10 border border-white/20 rounded-2xl text-white outline-none focus:ring-4 focus:ring-purple-500/30 transition-all font-medium text-lg"
+                        placeholder="Digite seu login"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="text-left">
+                      <label className="block text-xs font-bold text-purple-300 uppercase tracking-widest mb-2 ml-1">Senha</label>
+                      <input
+                        type="password"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleCustomerLogin()}
+                        className="w-full px-5 py-4 bg-white/10 border border-white/20 rounded-2xl text-white outline-none focus:ring-4 focus:ring-purple-500/30 transition-all font-medium text-lg"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                    <button
+                      onClick={handleCustomerLogin}
+                      disabled={isLoggingIn}
+                      className={`w-full py-4 rounded-2xl font-black text-xl tracking-tighter transition-all shadow-2xl ${
+                        isLoggingIn 
+                          ? 'bg-white/20 text-white/50 cursor-not-allowed scale-95' 
+                          : 'bg-white text-purple-900 hover:bg-white hover:scale-[1.05] active:scale-[0.95]'
+                      }`}
+                    >
+                      {isLoggingIn ? 'AUTENTICANDO...' : 'ENTRAR AGORA'}
+                    </button>
+                    <p className="text-white/40 text-xs text-center">
+                      Seu saldo será consumido automaticamente.
+                    </p>
+                  </div>
                 </div>
+              )}
+
+              <div className="mt-10 pt-8 border-t border-white/5 flex justify-between items-center text-purple-300 text-xs font-bold uppercase tracking-widest">
+                <span>MÁQUINA {config.stationNumber || '??'}</span>
+                <span>SERVIDOR {config.serverIp || 'OFFLINE'}</span>
               </div>
-            )}
+            </div>
           </div>
         </div>
 
