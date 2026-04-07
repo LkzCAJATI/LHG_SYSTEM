@@ -6,7 +6,8 @@ contextBridge.exposeInMainWorld("lhgSystem", {
   createBackup: () => ipcRenderer.invoke("lhg:state:backup"),
   getInfo: () => ipcRenderer.invoke("lhg:info"),
   quitApp: () => ipcRenderer.invoke("lhg:app:quit"),
-  // Novos Handlers de Rede
+  
+  // Handlers de Rede
   sendNetworkCommand: (command) => ipcRenderer.invoke("lhg:network:command", command),
   onNetworkEvent: (callback) => {
     const subscription = (event, ...args) => callback(...args);
@@ -16,11 +17,16 @@ contextBridge.exposeInMainWorld("lhgSystem", {
   getLocalIp: () => ipcRenderer.invoke("lhg:network:ip"),
   scanNetwork: () => ipcRenderer.invoke("lhg:network:scan"),
   getServerStatus: () => ipcRenderer.invoke("lhg:network:get-server-status"),
+  
+  // Handlers de Login Remoto
   onLoginRequest: (callback) => {
     const subscription = (event, data) => callback(data);
     ipcRenderer.on("lhg:network:login-request", subscription);
     return () => ipcRenderer.removeListener("lhg:network:login-request", subscription);
   },
   sendLoginResponse: (data) => ipcRenderer.send("lhg:network:login-response", data),
-  broadcastWallpaper: (data) => ipcRenderer.send("lhg:network:broadcast-wallpaper", data)
+  
+  // Handlers de Visual/Janela
+  broadcastWallpaper: (data) => ipcRenderer.send("lhg:network:broadcast-wallpaper", data),
+  setWindowMode: (data) => ipcRenderer.invoke("lhg:window:setMode", data)
 });

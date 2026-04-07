@@ -24,6 +24,7 @@ declare global {
       onLoginRequest: (callback: (data: any) => void) => () => void;
       sendLoginResponse: (data: { deviceId: string; success: boolean; message?: string }) => void;
       broadcastWallpaper: (data: { url: string }) => void;
+      setWindowMode: (data: { mode: 'kiosk' | 'floating' }) => Promise<void>;
     };
   }
 }

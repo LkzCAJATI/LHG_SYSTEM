@@ -309,6 +309,17 @@ const ClientView: React.FC = () => {
     }
   }, []);
 
+  // Controlar o modo da janela (Kiosk vs Floating)
+  useEffect(() => {
+    if (window.lhgSystem?.setWindowMode) {
+      if (state.isLocked || state.isPaused) {
+        window.lhgSystem.setWindowMode({ mode: 'kiosk' });
+      } else {
+        window.lhgSystem.setWindowMode({ mode: 'floating' });
+      }
+    }
+  }, [state.isLocked, state.isPaused]);
+
   // Garante que o cliente não use fundo local: somente painel admin.
   useEffect(() => {
     localStorage.removeItem('lhg-client-wallpaper');
@@ -812,89 +823,45 @@ const ClientView: React.FC = () => {
     );
   }
 
-  // Tela principal (conectado e desbloqueado)
+  // TELA PRINCIPAL (LIBERADA) -> AGORA É UMA BARRA FLUTUANTE
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900">
-      {/* Header */}
-      <div className="bg-black/20 backdrop-blur-sm px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-3xl">🎮</span>
-            <div>
-              <h1 className="text-xl font-bold text-white">GameZone</h1>
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-                <span className="text-green-400 text-sm">Conectado ao servidor ({config.serverIp})</span>
-              </div>
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-purple-200 text-sm">Sessão Ativa</div>
-            <div className="text-3xl font-mono font-bold text-white">
-              {formatTime(state.timeRemaining)}
-            </div>
+    <div className="h-screen w-screen flex flex-col justify-start items-end p-2 pointer-events-none select-none">
+      {/* Barra Flutuante */}
+      <div className="bg-black/60 backdrop-blur-xl rounded-2xl p-3 border border-white/10 shadow-2xl pointer-events-auto flex items-center gap-4 animate-in slide-in-from-right-10 duration-500">
+        {/* Logo / Nome */}
+        <div className="flex items-center gap-2 border-r border-white/10 pr-3">
+          <div className="text-xl">🎮</div>
+          <div className="text-xs font-black text-white leading-none uppercase tracking-tighter">
+            {settings.systemName || 'LHG'}
           </div>
         </div>
-      </div>
 
-      {/* Conteúdo Principal */}
-      <div className="flex items-center justify-center h-[calc(100vh-100px)]">
-        <div className="text-center">
-          <div className="text-9xl mb-8">🖥️</div>
-          <h2 className="text-3xl font-bold text-white mb-4">Computador Liberado</h2>
-          <p className="text-purple-200 text-xl mb-8">
-            Aproveite sua sessão de jogos!
-          </p>
-          
-          {/* Barra de progresso do tempo */}
-          <div className="w-96 mx-auto">
-            <div className="bg-white/20 rounded-full h-4 overflow-hidden">
-              <div 
-                className="bg-gradient-to-r from-green-400 to-green-500 h-full transition-all duration-1000"
-                style={{ 
-                  width: `${Math.min(100, (state.timeRemaining / 3600) * 100)}%` 
-                }}
-              ></div>
-            </div>
-            <div className="flex justify-between text-purple-200 text-sm mt-2">
-              <span>Tempo restante</span>
-              <span>{formatTime(state.timeRemaining)}</span>
-            </div>
+        {/* Status / Tempo */}
+        <div className="flex flex-col items-start min-w-[100px]">
+          <div className="text-[10px] font-bold text-purple-300 uppercase tracking-widest leading-none mb-1">Tempo Restante</div>
+          <div className={`text-2xl font-mono font-black leading-none ${state.timeRemaining <= 300 ? 'text-red-400 animate-pulse' : 'text-white'}`}>
+            {formatTime(state.timeRemaining)}
           </div>
-
-          {/* Aviso de tempo baixo */}
-          {state.timeRemaining > 0 && state.timeRemaining <= 300 && (
-            <div className="mt-8 bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-4 inline-block">
-              <div className="text-yellow-300 font-medium">
-                ⚠️ Atenção: Seu tempo está acabando!
-              </div>
-              <div className="text-yellow-200 text-sm">
-                Fale com o atendente para adicionar mais tempo.
-              </div>
-            </div>
-          )}
         </div>
+
+        {/* Botão de Sair */}
+        <button
+          onClick={() => setShowExitModal(true)}
+          className="bg-red-500 hover:bg-red-600 text-white p-2.5 rounded-xl transition-all hover:scale-110 active:scale-90 shadow-lg"
+          title="Encerrar Sessão"
+        >
+          <LogOut size={20} />
+        </button>
       </div>
 
-      {/* Mensagem do servidor */}
+      {/* Mensagens do servidor flutuantes */}
       {state.message && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-yellow-400 text-yellow-900 px-6 py-3 rounded-lg shadow-lg animate-bounce">
+        <div className="mt-2 bg-yellow-400 text-yellow-900 px-4 py-2 rounded-xl text-xs font-bold shadow-xl animate-bounce pointer-events-auto">
           📢 {state.message}
         </div>
       )}
 
-      {/* Footer */}
-      <div className="fixed bottom-0 left-0 right-0 bg-black/20 backdrop-blur-sm px-6 py-3">
-        <div className="flex items-center justify-between text-purple-200 text-sm">
-          <span>GameZone - Sistema de Gerenciamento de LAN House</span>
-          <span>Para suporte, fale com o atendente</span>
-        </div>
-      </div>
-
-      {/* Botão de encerrar sessão (visivel ao cliente) */}
-      {state.sessionId && endSessionUI}
-
-      {/* Botão de Configurações (Admin) */}
+      {/* Modais (Config e Saída) */}
       <button
         onClick={() => {
           setSettingsLoginStep('login');
@@ -903,8 +870,7 @@ const ClientView: React.FC = () => {
           setSettingsError('');
           setShowSettingsModal(true);
         }}
-        className="fixed bottom-4 left-4 bg-white/20 hover:bg-white/40 text-white p-3 rounded-full backdrop-blur-sm transition-all z-50 shadow-lg"
-        title="Configurações do Servidor"
+        className="fixed bottom-4 left-4 text-white/20 hover:text-white/60 transition-all pointer-events-auto"
       >
         ⚙️
       </button>

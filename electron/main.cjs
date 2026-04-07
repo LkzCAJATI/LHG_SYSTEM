@@ -187,6 +187,28 @@ function registerIpcHandlers() {
     return !!wss;
   });
 
+  ipcMain.handle("lhg:window:setMode", async (_, { mode }) => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (!win) return;
+
+    if (mode === "kiosk") {
+      win.setKiosk(true);
+      win.setAlwaysOnTop(true, "screen-saver");
+      win.setFullScreen(true);
+    } else if (mode === "floating") {
+      const { screen } = require("electron");
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { width } = primaryDisplay.workAreaSize;
+      
+      win.setKiosk(false);
+      win.setFullScreen(false);
+      win.setAlwaysOnTop(true, "status");
+      win.setSize(320, 80);
+      // Posicionar no topo direito
+      win.setPosition(width - 340, 20);
+    }
+  });
+
   ipcMain.on("lhg:network:broadcast-wallpaper", (_, { url }) => {
     connectedSockets.forEach((socket) => {
       if (socket.readyState === WebSocket.OPEN) {
