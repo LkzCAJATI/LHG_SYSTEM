@@ -575,6 +575,88 @@ const ClientView: React.FC = () => {
     );
   }
 
+  const settingsUI = showSettingsModal && (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4 text-left">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
+          <h3 className="font-semibold text-gray-800">Acesso Administrativo</h3>
+          <button onClick={() => setShowSettingsModal(false)} className="text-gray-500 hover:text-gray-700">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="p-6">
+          {settingsLoginStep === 'login' ? (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">Autentique-se para alterar o IP ou número da máquina.</p>
+              {settingsError && <p className="text-red-500 text-sm">{settingsError}</p>}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Usuário / Admin</label>
+                <input
+                  type="text"
+                  value={settingsUsername}
+                  onChange={(e) => setSettingsUsername(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg outline-none text-black bg-white"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+                <input
+                  type="password"
+                  value={settingsPassword}
+                  onChange={(e) => setSettingsPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAdminSettingsLogin()}
+                  className="w-full px-3 py-2 border rounded-lg outline-none text-black bg-white"
+                />
+              </div>
+              <button
+                onClick={handleAdminSettingsLogin}
+                className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Entrar
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">Altere o IP para o mesmo que aparece no servidor.</p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">IP do Servidor</label>
+                <input
+                  type="text"
+                  defaultValue={config?.serverIp}
+                  id="new-ip"
+                  className="w-full px-3 py-2 border rounded-lg outline-none text-black bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Número da Máquina</label>
+                <input
+                  type="text"
+                  defaultValue={config?.stationNumber}
+                  id="new-station"
+                  className="w-full px-3 py-2 border rounded-lg outline-none text-black bg-white"
+                />
+              </div>
+              <button
+                onClick={() => {
+                  const ipValue = (document.getElementById('new-ip') as HTMLInputElement).value;
+                  const stationValue = (document.getElementById('new-station') as HTMLInputElement).value;
+                  const newConfig: ClientConfig = { serverIp: ipValue.trim(), stationNumber: stationValue.trim() };
+                  localStorage.setItem(CLIENT_CONFIG_KEY, JSON.stringify(newConfig));
+                  setShowSettingsModal(false);
+                  window.location.reload();
+                }}
+                className="w-full py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Salvar e Reiniciar
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   // Cliente sempre inicia bloqueado e só libera por comando do servidor (ou quando pausado)
   if (state.isLocked || state.isPaused) {
     const wallpaperStyle = wallpaperToUse 
@@ -698,6 +780,22 @@ const ClientView: React.FC = () => {
           </div>
         )}
 
+        {/* Botão de Configurações (Admin) */}
+        <button
+          onClick={() => {
+            setSettingsLoginStep('login');
+            setSettingsUsername('');
+            setSettingsPassword('');
+            setSettingsError('');
+            setShowSettingsModal(true);
+          }}
+          className="fixed bottom-4 left-4 bg-white/20 hover:bg-white/40 text-white p-3 rounded-full backdrop-blur-sm transition-all z-50 shadow-lg"
+          title="Configurações do Servidor"
+        >
+          ⚙️
+        </button>
+
+        {settingsUI}
         {exitUI}
       </div>
     );
@@ -774,6 +872,14 @@ const ClientView: React.FC = () => {
         </div>
       )}
 
+      {/* Footer */}
+      <div className="fixed bottom-0 left-0 right-0 bg-black/20 backdrop-blur-sm px-6 py-3">
+        <div className="flex items-center justify-between text-purple-200 text-sm">
+          <span>GameZone - Sistema de Gerenciamento de LAN House</span>
+          <span>Para suporte, fale com o atendente</span>
+        </div>
+      </div>
+
       {/* Botão de encerrar sessão (visivel ao cliente) */}
       {state.sessionId && endSessionUI}
 
@@ -786,96 +892,13 @@ const ClientView: React.FC = () => {
           setSettingsError('');
           setShowSettingsModal(true);
         }}
-        className="fixed bottom-4 left-4 bg-white/10 hover:bg-white/30 text-white/50 p-2 rounded-lg backdrop-blur-sm transition-all z-40"
+        className="fixed bottom-4 left-4 bg-white/20 hover:bg-white/40 text-white p-3 rounded-full backdrop-blur-sm transition-all z-50 shadow-lg"
         title="Configurações do Servidor"
       >
         ⚙️
       </button>
 
-      {/* Modal de Configurações Admin */}
-      {showSettingsModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden text-left">
-            <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
-              <h3 className="font-semibold text-gray-800">Acesso Administrativo</h3>
-              <button onClick={() => setShowSettingsModal(false)} className="text-gray-500 hover:text-gray-700">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-6">
-              {settingsLoginStep === 'login' ? (
-                <div className="space-y-4">
-                  <p className="text-sm text-gray-600">Autentique-se para alterar o IP ou número da máquina.</p>
-                  {settingsError && <p className="text-red-500 text-sm">{settingsError}</p>}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Usuário / Admin</label>
-                    <input
-                      type="text"
-                      value={settingsUsername}
-                      onChange={(e) => setSettingsUsername(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg outline-none text-black"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
-                    <input
-                      type="password"
-                      value={settingsPassword}
-                      onChange={(e) => setSettingsPassword(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleAdminSettingsLogin()}
-                      className="w-full px-3 py-2 border rounded-lg outline-none text-black"
-                    />
-                  </div>
-                  <button
-                    onClick={handleAdminSettingsLogin}
-                    className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors"
-                  >
-                    Entrar
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">IP do Servidor</label>
-                    <input
-                      type="text"
-                      defaultValue={config?.serverIp}
-                      id="new-ip"
-                      className="w-full px-3 py-2 border rounded-lg outline-none text-black"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Número da Máquina</label>
-                    <input
-                      type="text"
-                      defaultValue={config?.stationNumber}
-                      id="new-station"
-                      className="w-full px-3 py-2 border rounded-lg outline-none text-black"
-                    />
-                  </div>
-                  <button
-                    onClick={() => {
-                      const ip = (document.getElementById('new-ip') as HTMLInputElement).value;
-                      const station = (document.getElementById('new-station') as HTMLInputElement).value;
-                      setSetupData({ serverIp: ip, stationNumber: station });
-                      setShowSettingsModal(false);
-                      // handleSetupSave vai ser chamado via efeito colateral ou manualmente
-                      const newConfig: ClientConfig = { serverIp: ip, stationNumber: station };
-                      localStorage.setItem(CLIENT_CONFIG_KEY, JSON.stringify(newConfig));
-                      // Forçar recarga para aplicar novo IP
-                      window.location.reload();
-                    }}
-                    className="w-full py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
-                  >
-                    Salvar e Reiniciar
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
+      {settingsUI}
       {exitUI}
     </div>
   );
