@@ -1,7 +1,7 @@
 {
   "name": "lhg-system",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.4",
   "type": "module",
   "main": "electron/main.cjs",
   "repository": {
@@ -13,8 +13,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
-    "build:exe": "vite build && electron-builder --win",
-    "build:exe:publish": "vite build && electron-builder --win --publish always"
+    "bump:build-version": "node scripts/bump-build-version.cjs",
+    "build:exe": "node scripts/build-exe.cjs",
+    "build:exe:publish": "node scripts/build-exe.cjs --publish"
   },
   "dependencies": {
     "@types/uuid": "^10.0.0",
@@ -60,6 +61,7 @@
     },
     "win": {
       "icon": "build/icon.ico",
+      "artifactName": "LHG SYSTEM Setup ${env.BUILD_VERSION}.${ext}",
       "target": [
         "nsis"
       ]
@@ -79,5 +81,6 @@
       "repo": "LHG_SYSTEM",
       "releaseType": "release"
     }
-  }
+  },
+  "buildVersion": "1.0.0.4"
 }

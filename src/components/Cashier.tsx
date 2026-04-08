@@ -163,6 +163,8 @@ export function Cashier() {
       downPayment.amount > 0 ? { ...downPayment, date: new Date() } : undefined
     );
     if (sale) {
+      // Generate fiscal receipt (Nota Fiscal)
+      generateReceiptPDF(sale, settings, 'download');
       setLastSale(sale);
       setShowPayment(false);
       setCashReceived('');

@@ -130,45 +130,69 @@ export const generateOSPDF = async (os: ServiceOrder, settings: any, action: 'do
 export const generateBudgetPDF = async (budget: Budget, settings: any, action: 'download' | 'print' = 'download') => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
-  
+
+  // Header
   drawHeader(doc, settings);
 
+  // Title
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
-  doc.text('ORÇAMENTO E APROVAÇÃO DE SERVIÇO OU MONTAGEM', pageWidth/2, 48, { align: 'center' });
+  doc.setTextColor(0, 0, 0);
+  doc.text('ORÇAMENTO E APROVAÇÃO DE SERVIÇO OU MONTAGEM', pageWidth / 2, 48, { align: 'center' });
+
+  // Budget metadata
   doc.setFontSize(10);
   doc.text(`ORDEM DE SERVIÇO Nº   ${budget.externalId || ''}`, 15, 60);
   doc.text(`Data Orçamento:   ${format(new Date(budget.createdAt), 'dd/MM/yyyy')}`, pageWidth - 15, 60, { align: 'right' });
 
-  // Tabela
+  // ----- Dados do Cliente -----
+  doc.setFillColor(107, 33, 168);
+  doc.rect(15, 68, pageWidth - 30, 8, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(10);
+  doc.text('👤 DADOS DO CLIENTE', 18, 74);
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Nome: ${budget.customerName || '____________________'}`, 15, 84);
+  doc.text(`CPF: ${budget.customerCPF || '____________________'}`, 15, 92);
+  doc.text(`Telefone: ${budget.customerPhone || '____________________'}`, 15, 100);
+
+  // ----- Tabela de Itens -----
   autoTable(doc, {
-    startY: 65,
+    startY: 110,
     head: [['Descrição', 'VALOR', 'Total']],
     body: budget.items.map(i => [i.description, `R$ ${i.unitPrice.toFixed(2)}`, `R$ ${i.totalPrice.toFixed(2)}`]),
     theme: 'grid',
     headStyles: { fillColor: [107, 33, 168] },
-    styles: { halign: 'center' },
+    styles: { halign: 'center', fontSize: 9 },
     columnStyles: { 0: { halign: 'left', cellWidth: 100 } }
   });
 
+  // Total amount box
   const finalY = (doc as any).lastAutoTable.finalY + 10;
   doc.setFillColor(107, 33, 168);
   doc.rect(pageWidth - 75, finalY - 5, 60, 10, 'F');
   doc.setTextColor(255, 255, 255);
+  doc.setFontSize(10);
   doc.text(`TOTAL:   R$ ${budget.total.toFixed(2)}`, pageWidth - 45, finalY + 1.5, { align: 'center' });
 
-  // Regras
+  // ----- Regras de Orçamento -----
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(8);
-  doc.text('REGRAS DE ORÇAMENTO / CONSERTO', 15, finalY + 20);
-  const rules = doc.splitTextToSize(settings.osTermsTemplate || '', pageWidth/2 - 20);
-  doc.text(rules, 15, finalY + 25);
+  const rulesY = finalY + 20;
+  doc.text('REGRAS DE ORÇAMENTO / CONSERTO', 15, rulesY);
+  const rules = doc.splitTextToSize(settings.osTermsTemplate || '', pageWidth / 2 - 20);
+  doc.text(rules, 15, rulesY + 5);
 
-  doc.text('REGRAS DE PAGAMENTO', pageWidth/2 + 10, finalY + 20);
-  const payRules = doc.splitTextToSize(settings.budgetRulesTemplate || '', pageWidth/2 - 20);
-  doc.text(payRules, pageWidth/2 + 10, finalY + 25);
+  // ----- Regras de Pagamento -----
+  const payY = rulesY + 5 + (rules.length * 4) + 10;
+  doc.text('REGRAS DE PAGAMENTO', pageWidth / 2 + 10, payY);
+  const payRules = doc.splitTextToSize(settings.budgetRulesTemplate || '', pageWidth / 2 - 20);
+  doc.text(payRules, pageWidth / 2 + 10, payY + 5);
 
-  const fileName = `Orcamento_${budget.externalId || budget.id.substring(0,6)}.pdf`;
+  // Save / Print
+  const fileName = `Orcamento_${budget.externalId || budget.id.substring(0, 6)}.pdf`;
   if (action === 'print') {
     doc.autoPrint();
     window.open(doc.output('bloburl'), '_blank');
@@ -176,7 +200,6 @@ export const generateBudgetPDF = async (budget: Budget, settings: any, action: '
     doc.save(fileName);
   }
 };
-
 export const generateContractPDF = async (sale: Sale, settings: any, type: 'venda' | 'compra' = 'venda') => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
