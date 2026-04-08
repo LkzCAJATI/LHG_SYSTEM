@@ -24,7 +24,17 @@ declare global {
       onLoginRequest: (callback: (data: any) => void) => () => void;
       sendLoginResponse: (data: { deviceId: string; success: boolean; message?: string }) => void;
       broadcastWallpaper: (data: { url: string }) => void;
+      // Remote desktop helpers
+      getScreenSources: () => Promise<Array<{ id: string; name: string }>>;
+      sendRemoteInput: (data: { deviceId: string; input: any }) => Promise<{ ok: boolean; error?: string }>;
+      onRemoteInput: (callback: (data: any) => void) => () => void;
+      executeRemoteInput: (input: any) => void;
       setWindowMode: (data: { mode: 'kiosk' | 'floating' }) => Promise<void>;
+      docs?: {
+        select: () => Promise<{ path: string; name: string } | null>;
+        save: (data: { sourcePath: string; originalName: string }) => Promise<{ ok: boolean; filename: string; path: string; error?: string }>;
+        open: (filename: string) => Promise<{ ok: boolean; error?: string }>;
+      };
     };
   }
 }

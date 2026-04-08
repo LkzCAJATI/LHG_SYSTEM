@@ -4,6 +4,7 @@ export interface User {
   username: string;
   password: string;
   role: 'admin' | 'employee';
+  prefix: string; // Ex: 'L' para Lucas, 'S' para Sergio
   createdAt: Date;
 }
 
@@ -41,6 +42,37 @@ export interface Session {
   totalPausedTime?: number; // In milliseconds
 }
 
+export interface ServiceOrder {
+  id: string;
+  externalId: string; // Ex: S-17
+  customerId?: string;
+  customerName: string;
+  customerCPF?: string;
+  customerPhone?: string;
+  isOver18: boolean;
+  
+  // Dados do Aparelho
+  deviceType: 'pc' | 'notebook' | 'console' | 'celular' | 'outro';
+  deviceBrandModel: string;
+  serialNumber: string;
+  physicalState: string; // riscos, trincos, acessórios
+  
+  // Serviços
+  selectedServices: string[]; // ['diagnóstico', 'formatação', ...]
+  otherService?: string;
+  
+  status: 'open' | 'analyzing' | 'ready' | 'delivered' | 'canceled';
+  notes?: string;
+  
+  userId: string;
+  userName: string;
+  createdAt: Date;
+  deliveredAt?: Date;
+  
+  budgetId?: string; // Vínculo com orçamento se gerado
+  attachments?: string[]; // Caminhos dos arquivos anexados (PDF/Fotos)
+}
+
 export interface Product {
   id: string;
   barcode: string;
@@ -55,7 +87,7 @@ export interface Product {
 
 export interface CartItem {
   id: string;
-  type: 'product' | 'time';
+  type: 'product' | 'time' | 'trade_in';
   productId?: string;
   deviceId?: string;
   name: string;
@@ -64,6 +96,8 @@ export interface CartItem {
   totalPrice: number;
   duration?: number; // em minutos para tempo
   extraControllers?: number;
+  customerId?: string;
+  customerName?: string;
 }
 
 export interface Sale {
@@ -72,7 +106,7 @@ export interface Sale {
   subtotal: number;
   discount: number;
   total: number;
-  paymentMethod: 'cash' | 'pix' | 'card' | 'mixed';
+  paymentMethod: 'cash' | 'pix' | 'card' | 'mixed' | 'installment';
   cashReceived?: number;
   change?: number;
   customerId?: string;
@@ -80,6 +114,26 @@ export interface Sale {
   userId: string;
   userName: string;
   createdAt: Date;
+  externalId?: string; // Numeração personalizada baseada no vendedor
+  contractGenerated?: boolean;
+  attachments?: string[]; // Caminhos dos arquivos anexados (PDF/Fotos)
+  
+  // Financeiro
+  downPayment?: {
+    amount: number;
+    method: string;
+    date: Date;
+  };
+  
+  // Parcelamento
+  installments?: {
+    id: string;
+    number: number;
+    amount: number;
+    dueDate: string; // ISO string
+    status: 'pending' | 'paid' | 'overdue';
+    paidAt?: string;
+  }[];
 }
 
 export interface Customer {
@@ -89,6 +143,9 @@ export interface Customer {
   password: string;
   phone?: string;
   email?: string;
+  cpf?: string;
+  rg?: string;
+  address?: string;
   credits: number; // em minutos
   balance: number; // em reais
   totalSpent: number;
@@ -100,8 +157,9 @@ export interface Customer {
 
 export interface BudgetItem {
   id: string;
-  type: 'part' | 'service' | 'console' | 'accessory';
+  type: 'part' | 'service' | 'console' | 'accessory' | 'trade_in';
   description: string;
+  imageUrl?: string;
   quantity: number;
   unitPrice: number;
   totalPrice: number;
@@ -118,6 +176,12 @@ export interface Budget {
   notes?: string;
   status: 'pending' | 'approved' | 'converted';
   saleId?: string;
+  osId?: string; // Vínculo com a OS de origem
+  externalId?: string; // Ex: L-14
+  downPayment?: {
+    amount: number;
+    method: string;
+  };
   createdAt: Date;
 }
 

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
   User, Device, Session, Product, Sale, Customer, Budget,
-  CashRegister, CashBills, CashMovement, StockMovement, CartItem, DEFAULT_PRICES
+  CashRegister, CashBills, CashMovement, StockMovement, CartItem, DEFAULT_PRICES, ServiceOrder, BudgetItem
 } from '../types';
 
 interface AppState {
@@ -27,6 +27,10 @@ interface AppState {
   
   // Budgets
   budgets: Budget[];
+
+  // Service Orders
+  serviceOrders: ServiceOrder[];
+  nextExternalIds: Record<string, number>; // prefix -> counter
   
   // Cash Register
   cashRegister: CashRegister | null;
@@ -51,6 +55,7 @@ interface AppState {
   endSessionSavingTime: (sessionId: string) => void;
   pauseSession: (sessionId: string) => void;
   resumeSession: (sessionId: string) => void;
+  addTimeToSession: (deviceId: string, minutes: number) => void;
   
   // Product Actions
   addProduct: (product: Omit<Product, 'id'>) => void;
@@ -65,7 +70,7 @@ interface AppState {
   clearCart: () => void;
   
   // Sale Actions
-  createSale: (paymentMethod: Sale['paymentMethod'], cashReceived?: number) => Sale | null;
+  createSale: (paymentMethod: Sale['paymentMethod'], cashReceived?: number, downPayment?: Sale['downPayment']) => Sale | null;
   addSale: (sale: Sale) => void;
   
   // Customer Actions
@@ -79,7 +84,13 @@ interface AppState {
   addBudget: (budget: Omit<Budget, 'id' | 'createdAt'>) => void;
   updateBudget: (id: string, budget: Partial<Budget>) => void;
   deleteBudget: (id: string) => void;
-  convertBudgetToSale: (budgetId: string) => void;
+  convertBudgetToSale: (budgetId: string, paymentMethod: Sale['paymentMethod'], installmentsCount?: number) => void;
+  
+  // OS Actions
+  addServiceOrder: (os: Omit<ServiceOrder, 'id' | 'createdAt' | 'externalId' | 'userId' | 'userName'>) => void;
+  updateServiceOrder: (id: string, os: Partial<ServiceOrder>) => void;
+  deleteServiceOrder: (id: string) => void;
+  convertOSToBudget: (osId: string) => void;
   
   // Cash Register Actions
   openCashRegister: (bills: CashBills) => void;
@@ -94,7 +105,6 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 
 // Inicializar dispositivos padrão
 const defaultDevices: Device[] = [
-  // PCs (PC 01 a PC 10)
   ...Array.from({ length: 10 }, (_, i) => ({
     id: `pc-${i + 1}`,
     name: `PC ${String(i + 1).padStart(2, '0')}`,
@@ -102,7 +112,6 @@ const defaultDevices: Device[] = [
     status: 'available' as const,
     pricePerHour: DEFAULT_PRICES.pc,
   })),
-  // PlayStation 5 (PS5 A a PS5 F)
   ...Array.from({ length: 6 }, (_, i) => ({
     id: `ps5-${i + 1}`,
     name: `PS5 ${String.fromCharCode(65 + i)}`,
@@ -112,7 +121,6 @@ const defaultDevices: Device[] = [
     consoleType: 'playstation' as const,
     extraControllers: 0,
   })),
-  // Consoles compartilhados
   {
     id: 'console-g',
     name: 'Console G',
@@ -131,7 +139,6 @@ const defaultDevices: Device[] = [
     consoleType: 'other' as const,
     extraControllers: 0,
   },
-  // Fliperama
   {
     id: 'arcade-1',
     name: 'Fliperama',
@@ -141,7 +148,6 @@ const defaultDevices: Device[] = [
   },
 ];
 
-// Usuário admin padrão
 const defaultUsers: User[] = [
   {
     id: '1',
@@ -149,6 +155,7 @@ const defaultUsers: User[] = [
     username: 'admin',
     password: 'admin123',
     role: 'admin',
+    prefix: 'A',
     createdAt: new Date(),
   },
 ];
@@ -167,6 +174,8 @@ export const useStore = create<AppState>()(
       cart: [],
       customers: [],
       budgets: [],
+      serviceOrders: [],
+      nextExternalIds: {},
       cashRegister: null,
       cashHistory: [],
       currentPage: 'cashier',
@@ -180,533 +189,256 @@ export const useStore = create<AppState>()(
         }
         return false;
       },
-
       logout: () => set({ currentUser: null }),
-
       addUser: (userData) => {
-        const user: User = {
-          ...userData,
-          id: generateId(),
-          createdAt: new Date(),
-        };
+        const user: User = { ...userData, id: generateId(), createdAt: new Date() };
         set(state => ({ users: [...state.users, user] }));
       },
-
       updateUser: (id, userData) => {
         set(state => ({
           users: state.users.map(u => u.id === id ? { ...u, ...userData } : u),
         }));
       },
-
       deleteUser: (id) => {
-        set(state => ({
-          users: state.users.filter(u => u.id !== id),
-        }));
+        set(state => ({ users: state.users.filter(u => u.id !== id) }));
       },
 
       // Device Actions
       addDevice: (deviceData) => {
-        const device: Device = {
-          ...deviceData,
-          id: generateId(),
-        };
+        const device: Device = { ...deviceData, id: generateId() };
         set(state => ({ devices: [...state.devices, device] }));
       },
-
       updateDevice: (id, deviceData) => {
         set(state => ({
           devices: state.devices.map(d => d.id === id ? { ...d, ...deviceData } : d),
         }));
       },
-
       deleteDevice: (id) => {
-        set(state => ({
-          devices: state.devices.filter(d => d.id !== id),
-        }));
+        set(state => ({ devices: state.devices.filter(d => d.id !== id) }));
       },
-
       startSession: (deviceId, customerName, duration, extraControllers, customerId) => {
         const device = get().devices.find(d => d.id === deviceId);
         if (!device) return;
-
-        // Calcular preço
-        let pricePerHour = device.pricePerHour;
+        const pricePerHour = device.pricePerHour;
         let extraPrice = 0;
-        
         if (device.type === 'console' && extraControllers > 0) {
           extraPrice = extraControllers * DEFAULT_PRICES.extraController * duration;
         }
-
         const totalPrice = (pricePerHour * duration) + extraPrice;
-
         const session: Session = {
           id: generateId(),
           deviceId,
           deviceName: device.name,
-          customerId: customerId ?? undefined,
+          customerId,
           customerName,
           startTime: new Date(),
-          duration: duration * 60, // converter para minutos
+          duration: duration * 60,
           extraControllers,
           totalPrice,
           paid: false,
         };
-
         set(state => ({
           sessions: [...state.sessions, session],
-          devices: state.devices.map(d =>
-            d.id === deviceId
-              ? { ...d, status: 'in_use' as const, currentSession: session }
-              : d
-          ),
+          devices: state.devices.map(d => d.id === deviceId ? { ...d, status: 'in_use', currentSession: session } : d),
         }));
       },
-
       endSession: (sessionId) => {
         const session = get().sessions.find(s => s.id === sessionId);
         if (!session) return;
-
         set(state => ({
-          sessions: state.sessions.map(s =>
-            s.id === sessionId ? { ...s, endTime: new Date(), paid: true } : s
-          ),
-          devices: state.devices.map(d =>
-            d.id === session.deviceId
-              ? { ...d, status: 'available' as const, currentSession: undefined }
-              : d
-          ),
+          sessions: state.sessions.map(s => s.id === sessionId ? { ...s, endTime: new Date(), paid: true } : s),
+          devices: state.devices.map(d => d.id === session.deviceId ? { ...d, status: 'available', currentSession: undefined } : d),
         }));
       },
-
-      // Encerra a sessão e, se o cliente tiver cadastro, salva o tempo restante como créditos
       endSessionSavingTime: (sessionId) => {
         const session = get().sessions.find(s => s.id === sessionId);
         if (!session) return;
-
-        const now = session.isPaused && session.pausedAt ? new Date(session.pausedAt).getTime() : new Date().getTime();
+        const now = new Date().getTime();
         const diff = now - new Date(session.startTime).getTime();
-        const effectiveElapsedMs = Math.max(0, diff - (session.totalPausedTime || 0));
-        const elapsedSeconds = Math.floor(effectiveElapsedMs / 1000);
-
-        // Sessão tem duração em MINUTOS no store, elapsedSeconds é o tempo já usado em segundos
+        const elapsedSeconds = Math.floor(diff / 1000);
         const totalSeconds = session.duration * 60;
         const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds);
         const remainingMinutes = Math.floor(remainingSeconds / 60);
-
-        // Finaliza a sessão
         set(state => ({
-          sessions: state.sessions.map(s =>
-            s.id === sessionId ? { ...s, endTime: new Date(), paid: true, isPaused: false } : s
-          ),
-          devices: state.devices.map(d =>
-            d.id === session.deviceId
-              ? { ...d, status: 'available' as const, currentSession: undefined }
-              : d
-          ),
+          sessions: state.sessions.map(s => s.id === sessionId ? { ...s, endTime: new Date(), paid: true } : s),
+          devices: state.devices.map(d => d.id === session.deviceId ? { ...d, status: 'available', currentSession: undefined } : d),
         }));
-
-        // Se tem cliente cadastrado e sobrou tempo, credita os minutos restantes
         if (session.customerId && remainingMinutes > 0) {
           get().addCredits(session.customerId, remainingMinutes);
         }
       },
-
       pauseSession: (sessionId) => {
         const session = get().sessions.find(s => s.id === sessionId);
         if (!session || session.isPaused) return;
-
-        const updatedSession = { ...session, isPaused: true, pausedAt: new Date() };
-
+        const updated = { ...session, isPaused: true, pausedAt: new Date() };
         set(state => ({
-          sessions: state.sessions.map(s => s.id === sessionId ? updatedSession : s),
-          devices: state.devices.map(d =>
-            d.id === session.deviceId ? { ...d, status: 'paused' as const, currentSession: updatedSession } : d
-          )
+          sessions: state.sessions.map(s => s.id === sessionId ? updated : s),
+          devices: state.devices.map(d => d.id === session.deviceId ? { ...d, status: 'paused', currentSession: updated } : d)
         }));
       },
-
       resumeSession: (sessionId) => {
         const session = get().sessions.find(s => s.id === sessionId);
         if (!session || !session.isPaused || !session.pausedAt) return;
-
-        const pausedDurationMs = new Date().getTime() - new Date(session.pausedAt).getTime();
-        const totalPausedTimeMs = (session.totalPausedTime || 0) + pausedDurationMs;
-
-        const updatedSession = { 
-          ...session, 
-          isPaused: false, 
-          pausedAt: undefined, 
-          totalPausedTime: totalPausedTimeMs 
-        };
-
+        const pausedMs = new Date().getTime() - new Date(session.pausedAt).getTime();
+        const updated = { ...session, isPaused: false, pausedAt: undefined, totalPausedTime: (session.totalPausedTime || 0) + pausedMs };
         set(state => ({
-          sessions: state.sessions.map(s => s.id === sessionId ? updatedSession : s),
-          devices: state.devices.map(d =>
-            d.id === session.deviceId ? { ...d, status: 'in_use' as const, currentSession: updatedSession } : d
-          )
+          sessions: state.sessions.map(s => s.id === sessionId ? updated : s),
+          devices: state.devices.map(d => d.id === session.deviceId ? { ...d, status: 'in_use', currentSession: updated } : d)
+        }));
+      },
+      addTimeToSession: (deviceId, minutes) => {
+        const device = get().devices.find(d => d.id === deviceId);
+        if (!device || !device.currentSession) return;
+        const session = device.currentSession;
+        const updated = { ...session, duration: session.duration + minutes };
+        set(state => ({
+          sessions: state.sessions.map(s => s.id === session.id ? updated : s),
+          devices: state.devices.map(d => d.id === deviceId ? { ...d, currentSession: updated } : d)
         }));
       },
 
       // Product Actions
-      addProduct: (productData) => {
-        const product: Product = {
-          ...productData,
-          id: generateId(),
-        };
-        set(state => ({ products: [...state.products, product] }));
-      },
-
-      updateProduct: (id, productData) => {
-        set(state => ({
-          products: state.products.map(p => p.id === id ? { ...p, ...productData } : p),
-        }));
-      },
-
-      deleteProduct: (id) => {
-        set(state => ({
-          products: state.products.filter(p => p.id !== id),
-        }));
-      },
-
+      addProduct: (p) => set(state => ({ products: [...state.products, { ...p, id: generateId() }] })),
+      updateProduct: (id, p) => set(state => ({ products: state.products.map(prod => prod.id === id ? { ...prod, ...p } : prod) })),
+      deleteProduct: (id) => set(state => ({ products: state.products.filter(p => p.id !== id) })),
       adjustStock: (productId, quantity, type) => {
         const product = get().products.find(p => p.id === productId);
         if (!product) return;
-
-        const previousStock = product.quantity;
-        const newStock = type === 'sale' ? previousStock - quantity : previousStock + quantity;
-
-        const movement: StockMovement = {
-          id: generateId(),
-          productId,
-          productName: product.name,
-          type,
-          quantity,
-          previousStock,
-          newStock,
-          userId: get().currentUser?.id || '',
-          userName: get().currentUser?.name || '',
-          createdAt: new Date(),
-        };
-
+        const newStock = type === 'sale' ? product.quantity - quantity : product.quantity + quantity;
         set(state => ({
-          products: state.products.map(p =>
-            p.id === productId ? { ...p, quantity: newStock } : p
-          ),
-          stockMovements: [...state.stockMovements, movement],
+          products: state.products.map(p => p.id === productId ? { ...p, quantity: newStock } : p),
+          stockMovements: [...state.stockMovements, { id: generateId(), productId, productName: product.name, type, quantity, previousStock: product.quantity, newStock, userId: get().currentUser?.id || '', userName: get().currentUser?.name || '', createdAt: new Date() }]
         }));
       },
 
       // Cart Actions
-      addToCart: (itemData) => {
-        const item: CartItem = {
-          ...itemData,
-          id: generateId(),
-        };
-        set(state => ({ cart: [...state.cart, item] }));
-      },
-
-      removeFromCart: (id) => {
-        set(state => ({ cart: state.cart.filter(item => item.id !== id) }));
-      },
-
-      updateCartItem: (id, itemData) => {
-        set(state => ({
-          cart: state.cart.map(item =>
-            item.id === id ? { ...item, ...itemData } : item
-          ),
-        }));
-      },
-
+      addToCart: (item) => set(state => ({ cart: [...state.cart, { ...item, id: generateId() }] })),
+      removeFromCart: (id) => set(state => ({ cart: state.cart.filter(i => i.id !== id) })),
+      updateCartItem: (id, item) => set(state => ({ cart: state.cart.map(i => i.id === id ? { ...i, ...item } : i) })),
       clearCart: () => set({ cart: [] }),
 
       // Sale Actions
-      createSale: (paymentMethod, cashReceived) => {
-        const { cart, currentUser, cashRegister } = get();
-        if (cart.length === 0 || !currentUser) return null;
-
-        const subtotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
-        const total = subtotal;
-
-        // Verificar troco se dinheiro
-        let change = 0;
-        if (paymentMethod === 'cash' && cashReceived) {
-          change = cashReceived - total;
-          if (change < 0) return null;
-        }
-
+      createSale: (paymentMethod, cashReceived, downPayment) => {
+        const { cart, currentUser } = get();
+        if (!currentUser) return null;
+        const subtotal = cart.reduce((s, i) => s + i.totalPrice, 0);
         const sale: Sale = {
           id: generateId(),
-          items: cart,
+          items: [...cart],
           subtotal,
           discount: 0,
-          total,
+          total: subtotal,
           paymentMethod,
           cashReceived,
-          change,
+          change: cashReceived ? cashReceived - subtotal : 0,
           userId: currentUser.id,
           userName: currentUser.name,
           createdAt: new Date(),
+          downPayment,
         };
-
-        // Atualizar estoque dos produtos
-        cart.forEach(item => {
-          if (item.type === 'product' && item.productId) {
-            get().adjustStock(item.productId, item.quantity, 'sale');
-          }
-          // Iniciar sessão se for tempo
-          if (item.type === 'time' && item.deviceId) {
-            const device = get().devices.find(d => d.id === item.deviceId);
-            if (device && device.type === 'pc') {
-              // startSession args: deviceId, customerName, duration(horas), extraControllers, customerId
-              // item.quantity é a duração da sessão (horas se unitário, ou minutos se formatado - vamos assumir que time é sempre 1 no carrinho e preço cobre tudo, mas duration precisa ser calculada)
-              // Usaremos o customer se houver, mas como createSale ñ tem customer name, usamos 'Cliente Avulso'
-              get().startSession(item.deviceId, 'Cliente Avulso', item.quantity, 0);
-            }
-          }
-        });
-
-        // Adicionar ao caixa
-        if (cashRegister && cashRegister.status === 'open') {
-          const movement: CashMovement = {
-            id: generateId(),
-            type: 'sale',
-            amount: total,
-            description: `Venda #${sale.id}`,
-            userId: currentUser.id,
-            userName: currentUser.name,
-            createdAt: new Date(),
-          };
-
-          set(state => ({
-            cashRegister: state.cashRegister ? {
-              ...state.cashRegister,
-              currentAmount: state.cashRegister.currentAmount + total,
-              totalSales: state.cashRegister.totalSales + total,
-              movements: [...state.cashRegister.movements, movement],
-            } : null,
-          }));
+        if (downPayment && downPayment.amount > 0) {
+          get().addCashMovement({ type: 'sale', amount: downPayment.amount, description: `Entrada Venda #${sale.id.substring(0,6)}` });
+        } else if (paymentMethod !== 'installment') {
+          get().addCashMovement({ type: 'sale', amount: subtotal, description: `Venda #${sale.id.substring(0,6)}` });
         }
-
-        set(state => ({
-          sales: [...state.sales, sale],
-          cart: [],
-        }));
-
+        set(state => ({ sales: [sale, ...state.sales], cart: [] }));
         return sale;
       },
+      addSale: (sale) => set(state => ({ sales: [sale, ...state.sales] })),
 
       // Customer Actions
-      addCustomer: (customerData) => {
-        const customer: Customer = {
-          ...customerData,
-          id: generateId(),
-          totalSpent: 0,
-          visits: 0,
-          createdAt: new Date(),
-        };
-        set(state => ({ customers: [...state.customers, customer] }));
-      },
+      addCustomer: (c) => set(state => ({ customers: [...state.customers, { ...c, id: generateId(), totalSpent: 0, visits: 0, credits: 0, balance: 0, createdAt: new Date() }] })),
+      updateCustomer: (id, c) => set(state => ({ customers: state.customers.map(cust => cust.id === id ? { ...cust, ...c } : cust) })),
+      deleteCustomer: (id) => set(state => ({ customers: state.customers.filter(c => c.id !== id) })),
+      addCredits: (id, m) => set(state => ({ customers: state.customers.map(c => c.id === id ? { ...c, credits: c.credits + m } : c) })),
+      removeCredits: (id, m) => set(state => ({ customers: state.customers.map(c => c.id === id ? { ...c, credits: Math.max(0, c.credits - m) } : c) })),
 
-      updateCustomer: (id, customerData) => {
-        set(state => ({
-          customers: state.customers.map(c => c.id === id ? { ...c, ...customerData } : c),
-        }));
+      // OS Actions
+      addServiceOrder: (osData) => {
+        const prefix = get().currentUser?.prefix || 'T';
+        const counter = (get().nextExternalIds[prefix] || 0) + 1;
+        const externalId = `${prefix}-${String(counter).padStart(2, '0')}`;
+        const os: ServiceOrder = { ...osData, id: generateId(), externalId, userId: get().currentUser?.id || '', userName: get().currentUser?.name || '', createdAt: new Date() };
+        set(state => ({ serviceOrders: [os, ...state.serviceOrders], nextExternalIds: { ...state.nextExternalIds, [prefix]: counter } }));
       },
-
-      deleteCustomer: (id) => {
-        set(state => ({
-          customers: state.customers.filter(c => c.id !== id),
-        }));
-      },
-
-      addCredits: (customerId, minutes) => {
-        set(state => ({
-          customers: state.customers.map(c =>
-            c.id === customerId
-              ? { ...c, credits: c.credits + minutes }
-              : c
-          ),
-        }));
-      },
-
-      removeCredits: (customerId, minutes) => {
-        set(state => ({
-          customers: state.customers.map(c =>
-            c.id === customerId
-              ? { ...c, credits: Math.max(0, c.credits - minutes) }
-              : c
-          ),
-        }));
+      updateServiceOrder: (id, os) => set(state => ({ serviceOrders: state.serviceOrders.map(o => o.id === id ? { ...o, ...os } : o) })),
+      deleteServiceOrder: (id) => set(state => ({ serviceOrders: state.serviceOrders.filter(os => os.id !== id) })),
+      convertOSToBudget: (osId) => {
+        const os = get().serviceOrders.find(o => o.id === osId);
+        if (!os) return;
+        const items: BudgetItem[] = os.selectedServices.map(s => ({ id: generateId(), type: 'service', description: s, quantity: 1, unitPrice: 0, totalPrice: 0 }));
+        get().addBudget({
+          customerName: os.customerName,
+          items,
+          subtotal: 0,
+          discount: 0,
+          total: 0,
+          osId: os.id,
+          status: 'pending'
+        });
+        get().updateServiceOrder(os.id, { status: 'analyzing' });
       },
 
       // Budget Actions
-      addBudget: (budgetData) => {
-        const budget: Budget = {
-          ...budgetData,
-          id: generateId(),
-          createdAt: new Date(),
-        };
-        set(state => ({ budgets: [...state.budgets, budget] }));
+      addBudget: (b) => {
+        const prefix = get().currentUser?.prefix || 'B';
+        const counter = (get().nextExternalIds[prefix] || 0) + 1;
+        const externalId = `${prefix}-${String(counter).padStart(2, '0')}`;
+        const budget: Budget = { ...b, id: generateId(), externalId, status: 'pending', createdAt: new Date() };
+        set(state => ({ budgets: [budget, ...state.budgets], nextExternalIds: { ...state.nextExternalIds, [prefix]: counter } }));
       },
-
-      updateBudget: (id, budgetData) => {
-        set(state => ({
-          budgets: state.budgets.map(b => b.id === id ? { ...b, ...budgetData } : b),
-        }));
-      },
-
-      deleteBudget: (id) => {
-        set(state => ({
-          budgets: state.budgets.filter(b => b.id !== id),
-        }));
-      },
-
-      convertBudgetToSale: (budgetId) => {
-        const budget = get().budgets.find(b => b.id === budgetId);
+      updateBudget: (id, b) => set(state => ({ budgets: state.budgets.map(bud => bud.id === id ? { ...bud, ...b } : bud) })),
+      deleteBudget: (id) => set(state => ({ budgets: state.budgets.filter(b => b.id !== id) })),
+      convertBudgetToSale: (id, paymentMethod, installmentsCount) => {
+        const budget = get().budgets.find(b => b.id === id);
         if (!budget) return;
-
-        // Adicionar itens do orçamento ao carrinho
-        budget.items.forEach(item => {
-          get().addToCart({
-            type: 'product',
-            name: item.description,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            totalPrice: item.totalPrice,
-          });
-        });
-
-        // Marcar orçamento como convertido
-        set(state => ({
-          budgets: state.budgets.map(b =>
-            b.id === budgetId ? { ...b, status: 'converted' as const } : b
-          ),
-        }));
+        const sale: Sale = {
+          id: generateId(),
+          items: budget.items.map(i => ({ id: generateId(), type: i.type === 'part' ? 'product' : 'time', name: i.description, quantity: i.quantity, unitPrice: i.unitPrice, totalPrice: i.totalPrice })),
+          subtotal: budget.subtotal,
+          discount: budget.discount,
+          total: budget.total,
+          paymentMethod,
+          userId: get().currentUser?.id || '',
+          userName: get().currentUser?.name || '',
+          createdAt: new Date(),
+          externalId: budget.externalId,
+          downPayment: budget.downPayment ? { ...budget.downPayment, date: new Date() } : undefined,
+        };
+        if (paymentMethod === 'installment' && installmentsCount) {
+          const instAmount = (sale.total - (sale.downPayment?.amount || 0)) / installmentsCount;
+          sale.installments = Array.from({ length: installmentsCount }, (_, i) => ({ id: generateId(), number: i + 1, amount: instAmount, dueDate: new Date(Date.now() + (i + 1) * 30 * 24 * 60 * 60 * 1000).toISOString(), status: 'pending' }));
+        }
+        set(state => ({ sales: [sale, ...state.sales], budgets: state.budgets.map(b => b.id === id ? { ...b, status: 'converted', saleId: sale.id } : b) }));
       },
 
-      // Cash Register Actions
+      // Cash Action
       openCashRegister: (bills) => {
-        const total = Object.entries(bills).reduce((sum, [value, qty]) => {
-          return sum + (Number(value) * qty);
-        }, 0);
-
-        const register: CashRegister = {
-          id: generateId(),
-          openedAt: new Date(),
-          initialAmount: total,
-          currentAmount: total,
-          totalSales: 0,
-          totalEntries: 0,
-          totalExits: 0,
-          status: 'open',
-          bills,
-          movements: [{
-            id: generateId(),
-            type: 'entry',
-            amount: total,
-            description: 'Abertura de caixa',
-            userId: get().currentUser?.id || '',
-            userName: get().currentUser?.name || '',
-            createdAt: new Date(),
-          }],
-        };
-
+        const total = Object.entries(bills).reduce((s, [v, q]) => s + (Number(v) * (q as number)), 0);
+        const register: CashRegister = { id: generateId(), openedAt: new Date(), initialAmount: total, currentAmount: total, totalSales: 0, totalEntries: 0, totalExits: 0, status: 'open', bills, movements: [{ id: generateId(), type: 'entry', amount: total, description: 'Abertura', userId: get().currentUser?.id || '', userName: get().currentUser?.name || '', createdAt: new Date() }] };
         set({ cashRegister: register });
       },
-
       closeCashRegister: () => {
         const register = get().cashRegister;
         if (!register) return;
-
-        const closedRegister: CashRegister = {
-          ...register,
-          closedAt: new Date(),
-          status: 'closed',
-        };
-
+        set(state => ({ cashRegister: null, cashHistory: [{ ...register, closedAt: new Date(), status: 'closed' }, ...state.cashHistory] }));
+      },
+      addCashMovement: (m) => {
+        const register = get().cashRegister;
+        if (!register) return;
+        const movement: CashMovement = { ...m, id: generateId(), userId: get().currentUser?.id || '', userName: get().currentUser?.name || '', createdAt: new Date() };
+        const change = m.type === 'entry' || m.type === 'sale' ? m.amount : -m.amount;
         set(state => ({
-          cashRegister: null,
-          cashHistory: [...state.cashHistory, closedRegister],
+          cashRegister: state.cashRegister ? {
+            ...state.cashRegister,
+            currentAmount: state.cashRegister.currentAmount + change,
+            totalEntries: m.type === 'entry' ? state.cashRegister.totalEntries + m.amount : state.cashRegister.totalEntries,
+            totalExits: m.type === 'exit' ? state.cashRegister.totalExits + m.amount : state.cashRegister.totalExits,
+            movements: [movement, ...state.cashRegister.movements]
+          } : null
         }));
       },
 
-      addCashMovement: (movementData) => {
-        const currentUser = get().currentUser;
-        if (!currentUser) return;
-
-        const movement: CashMovement = {
-          ...movementData,
-          id: generateId(),
-          userId: currentUser.id,
-          userName: currentUser.name,
-          createdAt: new Date(),
-        };
-
-        set(state => {
-          if (!state.cashRegister) return state;
-
-          const amountChange = movementData.type === 'entry' ? movementData.amount : -movementData.amount;
-
-          return {
-            cashRegister: {
-              ...state.cashRegister,
-              currentAmount: state.cashRegister.currentAmount + amountChange,
-              totalEntries: movementData.type === 'entry'
-                ? state.cashRegister.totalEntries + movementData.amount
-                : state.cashRegister.totalEntries,
-              totalExits: movementData.type === 'exit'
-                ? state.cashRegister.totalExits + movementData.amount
-                : state.cashRegister.totalExits,
-              movements: [...state.cashRegister.movements, movement],
-            },
-          };
-        });
-      },
-
-      // Sale Actions
-      addSale: (sale) => {
-        set(state => ({ sales: [...state.sales, sale] }));
-        
-        // Atualizar estoque dos produtos
-        sale.items.forEach(item => {
-          if (item.type === 'product' && item.productId) {
-            get().adjustStock(item.productId, item.quantity, 'sale');
-          }
-          // Iniciar sessão se for tempo
-          if (item.type === 'time' && item.deviceId) {
-            const device = get().devices.find(d => d.id === item.deviceId);
-            if (device && device.type === 'pc') {
-              get().startSession(item.deviceId, 'Cliente Avulso', item.quantity, 0);
-            }
-          }
-        });
-
-        // Adicionar ao caixa
-        const cashRegister = get().cashRegister;
-        if (cashRegister && cashRegister.status === 'open') {
-          const currentUser = get().currentUser;
-          const movement: CashMovement = {
-            id: generateId(),
-            type: 'sale',
-            amount: sale.total,
-            description: `Venda #${sale.id}`,
-            userId: currentUser?.id || '',
-            userName: currentUser?.name || '',
-            createdAt: new Date(),
-          };
-
-          set(state => ({
-            cashRegister: state.cashRegister ? {
-              ...state.cashRegister,
-              currentAmount: state.cashRegister.currentAmount + sale.total,
-              totalSales: state.cashRegister.totalSales + sale.total,
-              movements: [...state.cashRegister.movements, movement],
-            } : null,
-          }));
-        }
-      },
-
-      // UI Actions
       setCurrentPage: (page) => set({ currentPage: page }),
     }),
     {
@@ -720,6 +452,8 @@ export const useStore = create<AppState>()(
         sales: state.sales,
         customers: state.customers,
         budgets: state.budgets,
+        serviceOrders: state.serviceOrders,
+        nextExternalIds: state.nextExternalIds,
         cashRegister: state.cashRegister,
         cashHistory: state.cashHistory,
       }),

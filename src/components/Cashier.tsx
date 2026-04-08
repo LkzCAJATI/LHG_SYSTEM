@@ -4,26 +4,34 @@ import { CashBills } from '../types';
 import {
   ShoppingCart, Plus, Minus, Trash2, CreditCard,
   Banknote, Smartphone, Gamepad2, Monitor, Package,
-  Calculator, DollarSign, X, Barcode, Joystick, Zap
+  Calculator, DollarSign, X, Barcode, Joystick, Zap, CheckCircle, Printer, FileText
 } from 'lucide-react';
+import { generateReceiptPDF } from '../utils/pdfGenerator';
+import { useSettingsStore } from '../store/settingsStore';
 
 export function Cashier() {
   const {
-    devices, products, cart, cashRegister,
+    devices, products, cart, cashRegister, customers,
     addToCart, removeFromCart, updateCartItem, clearCart,
     createSale, openCashRegister, closeCashRegister, addCashMovement
   } = useStore();
+  const { settings } = useSettingsStore();
 
   const [showOpenCash, setShowOpenCash] = useState(false);
   const [showCloseCash, setShowCloseCash] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [lastSale, setLastSale] = useState<any>(null);
   const [showTimeModal, setShowTimeModal] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
   const [hours, setHours] = useState(1);
   const [extraControllers, setExtraControllers] = useState(0);
   const [selectedConsoleType, setSelectedConsoleType] = useState<'xbox' | 'switch' | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pix' | 'card'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pix' | 'card' | 'mixed' | 'installment'>('cash');
+  const [downPayment, setDownPayment] = useState({ amount: 0, method: 'cash' as any });
   const [cashReceived, setCashReceived] = useState('');
   const [bills, setBills] = useState<CashBills>({ 2: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 });
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -92,11 +100,14 @@ export function Cashier() {
       totalPrice,
       duration: hours,
       extraControllers,
+      customerId: selectedCustomerId || undefined,
+      customerName: customerName || undefined,
     });
 
     setShowTimeModal(false);
     setSelectedDevice(null);
     setCustomerName('');
+    setSelectedCustomerId(null);
     setHours(1);
     setExtraControllers(0);
     setSelectedConsoleType(null);
@@ -146,12 +157,18 @@ export function Cashier() {
     if (cart.length === 0) return;
     if (paymentMethod === 'cash' && Number(cashReceived) < total) return;
 
-    const sale = createSale(paymentMethod, Number(cashReceived));
+    const sale = createSale(
+      paymentMethod, 
+      Number(cashReceived), 
+      downPayment.amount > 0 ? { ...downPayment, date: new Date() } : undefined
+    );
     if (sale) {
+      setLastSale(sale);
       setShowPayment(false);
       setCashReceived('');
       setPaymentMethod('cash');
-      alert('Venda realizada com sucesso!');
+      setDownPayment({ amount: 0, method: 'cash' });
+      setShowSuccessModal(true);
     }
   };
 
@@ -566,13 +583,56 @@ export function Cashier() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Nome do Cliente (opcional)
                 </label>
-                <input
-                  type="text"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  placeholder="Nome do cliente"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => {
+                      setCustomerName(e.target.value);
+                      setSelectedCustomerId(null);
+                      setShowCustomerSuggestions(true);
+                    }}
+                    onFocus={() => setShowCustomerSuggestions(true)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none"
+                    placeholder="Nome do cliente (ou busque cadastrado...)"
+                  />
+                  {showCustomerSuggestions && customerName && (
+                    <div className="absolute z-[60] left-0 right-0 mt-1 bg-white border rounded-lg shadow-xl max-h-48 overflow-auto">
+                      {customers
+                        .filter(c => c.name.toLowerCase().includes(customerName.toLowerCase()))
+                        .map(customer => (
+                          <button
+                            key={customer.id}
+                            onClick={() => {
+                              setCustomerName(customer.name);
+                              setSelectedCustomerId(customer.id);
+                              setShowCustomerSuggestions(false);
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-purple-50 border-b last:border-0 transition-colors flex items-center justify-between"
+                          >
+                            <div>
+                              <p className="font-medium text-gray-800">{customer.name}</p>
+                              {customer.phone && <p className="text-xs text-gray-500">{customer.phone}</p>}
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs font-bold text-purple-600">{customer.credits} min</p>
+                              <p className="text-[10px] text-gray-400">Saldo</p>
+                            </div>
+                          </button>
+                        ))}
+                      {customers.filter(c => c.name.toLowerCase().includes(customerName.toLowerCase())).length === 0 && (
+                        <div className="px-4 py-3 text-sm text-gray-500 italic">
+                          Nenhum cliente cadastrado encontrado...
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {selectedCustomerId && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded text-[10px] font-bold">
+                      <CheckCircle className="w-3 h-3" /> CADASTRADO
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Seleção de tipo de console (para consoles compartilhados) */}
@@ -750,8 +810,52 @@ export function Cashier() {
                   <CreditCard className="w-6 h-6" />
                   <span className="text-sm">Cartão</span>
                 </button>
+                <button
+                  onClick={() => setPaymentMethod('installment')}
+                  className={`p-4 rounded-lg border-2 flex flex-col items-center gap-2 ${
+                    paymentMethod === 'installment'
+                      ? 'border-purple-600 bg-purple-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <FileText className="w-6 h-6 text-indigo-600" />
+                  <span className="text-sm">Carnê/OS</span>
+                </button>
               </div>
             </div>
+
+            {paymentMethod === 'installment' && (
+              <div className="mb-6 bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                <label className="block text-sm font-bold text-indigo-900 mb-3 flex items-center gap-2">
+                   <span>💰</span> Entrada / Adiantamento
+                </label>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className="text-xs text-indigo-700">Valor</label>
+                    <input
+                      type="number"
+                      value={downPayment.amount}
+                      onChange={(e) => setDownPayment(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                      className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-sm"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-indigo-700">Forma</label>
+                    <select
+                      value={downPayment.method}
+                      onChange={(e) => setDownPayment(prev => ({ ...prev, method: e.target.value as any }))}
+                      className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="cash">Dinheiro</option>
+                      <option value="pix">PIX</option>
+                      <option value="card">Cartão</option>
+                    </select>
+                  </div>
+                </div>
+                <p className="text-[10px] text-indigo-600">O valor da entrada será subtraído do total e registrado no caixa hoje.</p>
+              </div>
+            )}
 
             {paymentMethod === 'cash' && (
               <div className="mb-6">
@@ -895,6 +999,55 @@ export function Cashier() {
                 className="flex-1 px-4 py-3 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50"
               >
                 Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Sucesso */}
+      {showSuccessModal && lastSale && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
+          <div className="bg-white rounded-2xl p-8 max-w-sm w-full mx-4 text-center shadow-2xl">
+            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <CheckCircle className="w-10 h-10 text-green-600" />
+            </div>
+            <h3 className="text-2xl font-bold text-gray-800 mb-2">Venda Concluída!</h3>
+            <p className="text-gray-500 mb-6">A venda foi registrada com sucesso no sistema.</p>
+            
+            <div className="bg-gray-50 rounded-xl p-4 mb-6 text-left">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-gray-500">Total:</span>
+                <span className="font-bold">R$ {lastSale.total.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Pagamento:</span>
+                <span className="font-medium">{lastSale.paymentMethod.toUpperCase()}</span>
+              </div>
+              {lastSale.change > 0 && (
+                <div className="flex justify-between text-sm mt-1 text-green-600 font-bold">
+                  <span>Troco:</span>
+                  <span>R$ {lastSale.change.toFixed(2)}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => generateReceiptPDF(lastSale, settings, 'print')}
+                className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 flex items-center justify-center gap-2 shadow-lg shadow-purple-100 transition-all active:scale-95"
+              >
+                <Printer className="w-5 h-5" />
+                Imprimir Recibo
+              </button>
+              <button
+                onClick={() => {
+                  setShowSuccessModal(false);
+                  setLastSale(null);
+                }}
+                className="w-full py-3 text-gray-500 font-medium hover:text-gray-700 transition-colors"
+              >
+                Nova Venda
               </button>
             </div>
           </div>

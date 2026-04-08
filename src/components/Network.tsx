@@ -1,15 +1,33 @@
 import { useState, useEffect } from 'react';
 import { useNetworkStore } from '../store/networkStore';
+import { useStore } from '../store/useStore';
+import { Timer, Aperture, X, Maximize, Minimize, MousePointer2, Zap } from 'lucide-react';
+import RemoteDesktopViewer from './RemoteDesktopViewer';
 
 export default function Network() {
   const { 
     clients, serverIP, serverPort, setServerConfig, toggleClient, 
     shutdownClient, restartClient, scanNetwork, isScanning, 
-    detectedIp, detectIp, startServer, stopServer, isServerRunning, initializeIpc
+    detectedIp, detectIp, startServer, stopServer, isServerRunning, initializeIpc,
+    removeClient
   } = useNetworkStore();
   
+  const { 
+    devices, sessions, addTimeToSession
+  } = useStore();
+  
+  const [now, setNow] = useState(Date.now());
   const [editIP, setEditIP] = useState(serverIP);
   const [editPort, setEditPort] = useState(serverPort.toString());
+  const [showAddTimeModal, setShowAddTimeModal] = useState<string | null>(null);
+  const [customMinutes, setCustomMinutes] = useState('30');
+  const [remoteSessionId, setRemoteSessionId] = useState<string | null>(null);
+
+  // Efeito para atualizar o cronômetro visual a cada segundo
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
 
   // Carregar IP e inicializar ao montar
@@ -173,39 +191,112 @@ export default function Network() {
                   <span className="text-xs text-gray-400">{client.ip}</span>
                 </div>
                 
-                <div className="text-sm text-gray-400 mb-3">
-                  <p>Status: <span className={client.locked ? 'text-red-400' : 'text-green-400'}>
-                    {client.locked ? '🔒 Bloqueado' : '🔓 Liberado'}
-                  </span></p>
-                  {client.timeRemaining && (
-                    <p>Tempo restante: <span className="text-yellow-400">{client.timeRemaining} min</span></p>
-                  )}
+                <div className="text-sm text-gray-400 mb-3 space-y-1">
+                  <p className="flex items-center gap-2">
+                    Status: <span className={client.locked ? 'text-red-400 font-medium' : 'text-green-400 font-medium'}>
+                      {client.locked ? '🔒 Bloqueado' : '🔓 Liberado'}
+                    </span>
+                  </p>
+                  
+                  {(() => {
+                    // @ts-ignore
+                    const sources = async () => await window.lhgSystem?.getScreenSources();
+                    const device = devices.find(d => d.id === client.id);
+                    const session = sessions.find(s => s.id === device?.currentSession?.id);
+                    if (session && !client.locked) {
+                      // Calcular tempo restante: Duração total - Tempo decorrido
+                      const durationMs = session.duration * 60000;
+                      const elapsedMs = now - new Date(session.startTime).getTime() - (session.totalPausedTime || 0);
+                      const remainingMs = Math.max(0, durationMs - elapsedMs);
+                      
+                      const mins = Math.floor(remainingMs / 60000);
+                      const secs = Math.floor((remainingMs % 60000) / 1000);
+                      
+                      return (
+                        <p className="flex items-center gap-2 bg-yellow-500/10 p-1.5 rounded border border-yellow-500/20">
+                          <Timer size={14} className="text-yellow-500 animate-pulse" />
+                          <span className="text-yellow-500 font-bold font-mono">
+                            Restante: {mins}:{secs.toString().padStart(2, '0')}
+                          </span>
+                        </p>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
                 
                 <div className="flex gap-2">
                   <button
-                    onClick={() => toggleClient(client.id)}
+                    onClick={() => {
+                      // @ts-ignore
+                      if (!window.lhgSystem?.sendRemoteInput) return;
+                      if (!client.locked || confirm(`Tem certeza que deseja LIBERAR o acesso do PC "${client.name}"?`)) {
+                        toggleClient(client.id);
+                      }
+                    }}
                     className={`flex-1 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                       client.locked
-                        ? 'bg-green-600 hover:bg-green-700 text-white'
-                        : 'bg-red-600 hover:bg-red-700 text-white'
+                        ? 'bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-900/20'
+                        : 'bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-900/20'
                     }`}
                   >
                     {client.locked ? '🔓 Liberar' : '🔒 Bloquear'}
                   </button>
                   <button
-                    onClick={() => restartClient(client.id)}
-                    className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white rounded text-sm transition-colors"
+                    onClick={() => {
+                      if (confirm(`Reiniciar o PC "${client.name}" agora?`)) {
+                        restartClient(client.id);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white rounded text-sm transition-colors shadow-lg shadow-yellow-900/20"
                     title="Reiniciar PC"
                   >
                     🔄
                   </button>
                   <button
-                    onClick={() => shutdownClient(client.id)}
-                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-sm transition-colors"
+                    onClick={() => {
+                      if (confirm(`DESLIGAR o PC "${client.name}" remotamente?`)) {
+                        shutdownClient(client.id);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-sm transition-colors shadow-lg shadow-red-900/20"
                     title="Desligar PC"
                   >
                     ⏻
+                  </button>
+                  {sessions.some(s => {
+                    const d = devices.find(dev => dev.id === client.id);
+                    return s.id === d?.currentSession?.id;
+                  }) && (
+                    <button
+                      onClick={() => setShowAddTimeModal(client.id)}
+                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm font-medium transition-colors shadow-lg shadow-purple-900/20 flex items-center justify-center gap-1"
+                      title="Adicionar Tempo"
+                    >
+                      <Timer size={14} />
+                    </button>
+                  )}
+                  
+                  <button
+                    onClick={() => {
+                      // @ts-ignore
+                      if (window.lhgSystem?.executeRemoteInput) {
+                        // @ts-ignore
+                        window.lhgSystem.executeRemoteInput(client.id);
+                      }
+                      if (client.connected) {
+                        setRemoteSessionId(client.id);
+                      } else {
+                        alert('PC Offline. Não é possível iniciar acesso remoto.');
+                      }
+                    }}
+                    className={`flex-1 px-3 py-1.5 rounded text-sm font-medium transition-all flex items-center justify-center gap-1 ${
+                      client.connected 
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-900/20' 
+                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <Aperture size={14} /> Acesso
                   </button>
                 </div>
               </div>
@@ -224,20 +315,97 @@ export default function Network() {
             {disconnectedClients.map((client) => (
               <div
                 key={client.id}
-                className="bg-gray-700/30 rounded-lg p-4 border border-gray-600 opacity-60"
+                className="bg-gray-700/30 rounded-lg p-4 border border-gray-600 opacity-60 group relative flex flex-col justify-between"
               >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                    <span className="text-gray-300 font-medium">{client.name}</span>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                      <span className="text-gray-300 font-medium">{client.name}</span>
+                    </div>
+                    <span className="text-xs text-gray-500">{client.ip}</span>
                   </div>
-                  <span className="text-xs text-gray-500">{client.ip}</span>
+                  <p className="text-sm text-gray-500">
+                    Última conexão: {client.lastSeen ? new Date(client.lastSeen).toLocaleString() : 'Nunca'}
+                  </p>
                 </div>
-                <p className="text-sm text-gray-500">
-                  Última conexão: {client.lastSeen ? new Date(client.lastSeen).toLocaleString() : 'Nunca'}
-                </p>
+                
+                <button
+                  onClick={() => {
+                    if (confirm(`Remover permanentemente o PC "${client.name}" da lista?`)) {
+                      removeClient(client.id);
+                    }
+                  }}
+                  className="mt-3 text-xs text-red-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-300 flex items-center gap-1"
+                >
+                  🗑️ Remover da Rede
+                </button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Visualizador de Acesso Remoto */}
+      {remoteSessionId && (
+        <RemoteDesktopViewer 
+          deviceId={remoteSessionId} 
+          onClose={() => setRemoteSessionId(null)} 
+        />
+      )}
+
+      {/* Modal Adicionar Tempo */}
+      {showAddTimeModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+              <Timer className="text-purple-400" />
+              Adicionar Tempo
+            </h3>
+            <p className="text-gray-400 text-sm mb-6">
+              Quanto tempo deseja adicionar para <strong>{clients.find(c => c.id === showAddTimeModal)?.name}</strong>?
+            </p>
+            
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              {[15, 30, 60, 120].map(mins => (
+                <button
+                  key={mins}
+                  onClick={() => {
+                    addTimeToSession(showAddTimeModal, mins);
+                    setShowAddTimeModal(null);
+                  }}
+                  className="py-3 bg-gray-700 hover:bg-purple-600 text-white rounded-xl transition-all font-medium border border-gray-600"
+                >
+                  +{mins < 60 ? `${mins}min` : `${mins/60}h`}
+                </button>
+              ))}
+            </div>
+            
+            <div className="relative mb-6">
+              <input
+                type="number"
+                value={customMinutes}
+                onChange={(e) => setCustomMinutes(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-purple-500"
+                placeholder="Valor customizado (min)"
+              />
+              <button
+                onClick={() => {
+                  addTimeToSession(showAddTimeModal, parseInt(customMinutes));
+                  setShowAddTimeModal(null);
+                }}
+                className="absolute right-2 top-1.5 px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                Add
+              </button>
+            </div>
+            
+            <button
+              onClick={() => setShowAddTimeModal(null)}
+              className="w-full py-2 text-gray-400 hover:text-white transition-colors"
+            >
+              Cancelar
+            </button>
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
 import { useStore } from '../store/useStore';
 import { LogOut, X } from 'lucide-react';
@@ -15,6 +15,7 @@ interface ClientState {
   timeRemaining: number; // em segundos
   message: string | null;
   serverIp: string;
+  isRemoteActive: boolean;
 }
 
 interface ClientConfig {
@@ -37,6 +38,7 @@ const ClientView: React.FC = () => {
     timeRemaining: 0,
     message: null,
     serverIp: '',
+    isRemoteActive: false
   });
 
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -137,6 +139,78 @@ const ClientView: React.FC = () => {
   const sessionHasRegisteredCustomer = !!(activeSession?.customerId);
 
   // UI de encerrar sessão (botão visível ao cliente na tela ativa)
+  // Loop de captura de tela para acesso remoto
+  useEffect(() => {
+    if (!state.isRemoteActive) {
+      if (remoteStreamRef.current) {
+        remoteStreamRef.current.getTracks().forEach((t: any) => t.stop());
+        remoteStreamRef.current = null;
+      }
+      return;
+    }
+
+    const startCapture = async () => {
+      try {
+        const sources = await window.lhgSystem?.getScreenSources();
+        if (!sources || sources.length === 0) return;
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sources[0].id,
+              minWidth: 800,
+              maxWidth: 1280,
+              minHeight: 600,
+              maxHeight: 720
+            }
+          } as any
+        });
+
+        remoteStreamRef.current = stream;
+        
+        // Setup hidden video to capture frames
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.play();
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        const sendFrame = () => {
+          if (!state.isRemoteActive || !ctx) return;
+
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+          
+          const frame = canvas.toDataURL('image/jpeg', 0.5); // 50% compressão
+          socketRef.current?.send(JSON.stringify({
+            type: 'remote_frame',
+            frame
+          }));
+
+          if (state.isRemoteActive) {
+            setTimeout(sendFrame, 150); // ~7 FPS para não saturar
+          }
+        };
+
+        video.onloadedmetadata = () => sendFrame();
+
+      } catch (err) {
+        console.error('Erro ao capturar tela:', err);
+        setState(prev => ({ ...prev, isRemoteActive: false }));
+      }
+    };
+
+    startCapture();
+
+    return () => {
+      remoteStreamRef.current?.getTracks().forEach((t: any) => t.stop());
+    };
+  }, [state.isRemoteActive]);
+
   const endSessionUI = (
     <>
       <button
@@ -320,10 +394,7 @@ const ClientView: React.FC = () => {
     }
   }, [state.isLocked, state.isPaused]);
 
-  // Garante que o cliente não use fundo local: somente painel admin.
-  useEffect(() => {
-    localStorage.removeItem('lhg-client-wallpaper');
-  }, []);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
 
   // Conexão WebSocket Real
   useEffect(() => {
@@ -444,6 +515,23 @@ const ClientView: React.FC = () => {
           timeRemaining: data.duration * 60, // converter minutos para segundos
           isLocked: false,
         }));
+        break;
+      case 'add_time':
+        setState(prev => ({
+          ...prev,
+          timeRemaining: prev.timeRemaining + (data.minutes * 60)
+        }));
+        break;
+      case 'start_remote':
+        setState(prev => ({ ...prev, isRemoteActive: true }));
+        break;
+      case 'stop_remote':
+        setState(prev => ({ ...prev, isRemoteActive: false }));
+        break;
+      case 'remote_input':
+        if (window.lhgSystem?.executeRemoteInput) {
+          window.lhgSystem.executeRemoteInput(data.input);
+        }
         break;
       case 'end_session':
         setState(prev => ({
@@ -823,60 +911,183 @@ const ClientView: React.FC = () => {
     );
   }
 
-  // TELA PRINCIPAL (LIBERADA) -> AGORA É UMA BARRA FLUTUANTE
+  // Buscar informações do cliente atual
+  const activeSessionForHUD = state.sessionId ? sessions.find(s => s.id === state.sessionId) : null;
+  const currentCustomer = activeSessionForHUD?.customerId 
+    ? customers.find(c => c.id === activeSessionForHUD.customerId) 
+    : null;
+  const customerDisplayName = currentCustomer 
+    ? currentCustomer.name.split(' ')[0] 
+    : (activeSessionForHUD?.customerName?.split(' ')[0] || 'Visitante');
+
+  // TELA PRINCIPAL (LIBERADA) -> HUD COMPACTO NO TOPO DIREITO
+  // A janela Electron em modo floating é maior, frameless e transparente.
   return (
-    <div className="h-screen w-screen flex flex-col justify-start items-end p-2 pointer-events-none select-none">
-      {/* Barra Flutuante */}
-      <div className="bg-black/60 backdrop-blur-xl rounded-2xl p-3 border border-white/10 shadow-2xl pointer-events-auto flex items-center gap-4 animate-in slide-in-from-right-10 duration-500">
-        {/* Logo / Nome */}
-        <div className="flex items-center gap-2 border-r border-white/10 pr-3">
-          <div className="text-xl">🎮</div>
-          <div className="text-xs font-black text-white leading-none uppercase tracking-tighter">
-            {settings.systemName || 'LHG'}
+    <div
+      style={{ 
+        width: '100vw', 
+        height: '100vh', 
+        background: 'transparent', 
+        display: 'flex', 
+        alignItems: 'flex-start', 
+        justifyContent: 'flex-end', 
+        padding: '0' 
+      }}
+      className="pointer-events-none select-none overflow-hidden"
+    >
+      {/* HUD Pill — ocupa toda a janela frameless */}
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.95) 0%, rgba(67, 24, 108, 0.9) 100%)',
+          backdropFilter: 'blur(20px)',
+          WebkitAppRegion: 'drag' as any,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          padding: '0 16px',
+          borderRadius: '20px',
+          border: '1px solid rgba(255,255,255,0.2)',
+          boxShadow: '0 15px 50px rgba(0,0,0,0.6), inset 0 0 20px rgba(255,255,255,0.05)',
+          pointerEvents: 'auto',
+          margin: '2px', // Pequena margem interna para o brilho da borda
+        } as React.CSSProperties}
+      >
+        {/* Info do Usuário / Estação */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+          <div style={{ position: 'relative' }}>
+            {settings.logo ? (
+              <img src={settings.logo} alt="logo" style={{ height: '36px', width: '36px', borderRadius: '10px', objectFit: 'cover', border: '1px solid rgba(255,255,255,0.2)' }} />
+            ) : (
+              <div style={{ width: '36px', height: '36px', background: 'rgba(255,255,255,0.1)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
+                👤
+              </div>
+            )}
+            <div style={{ 
+              position: 'absolute', 
+              bottom: '-2px', 
+              right: '-2px', 
+              width: '12px', 
+              height: '12px', 
+              background: '#22c55e', 
+              borderRadius: '50%', 
+              border: '2px solid #1e1b4b',
+              boxShadow: '0 0 10px #22c55e'
+            }} />
+          </div>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+            <span style={{ fontSize: '12px', fontWeight: 900, color: '#fff', whiteSpace: 'nowrap', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {customerDisplayName}
+            </span>
+            <span style={{ fontSize: '10px', fontWeight: 700, color: 'rgba(216, 180, 254, 0.8)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              PC {config.stationNumber}
+            </span>
           </div>
         </div>
 
-        {/* Status / Tempo */}
-        <div className="flex flex-col items-start min-w-[100px]">
-          <div className="text-[10px] font-bold text-purple-300 uppercase tracking-widest leading-none mb-1">Tempo Restante</div>
-          <div className={`text-2xl font-mono font-black leading-none ${state.timeRemaining <= 300 ? 'text-red-400 animate-pulse' : 'text-white'}`}>
-            {formatTime(state.timeRemaining)}
-          </div>
+        {/* Divisor Vertical */}
+        <div style={{ width: '1px', height: '32px', background: 'rgba(255,255,255,0.2)', flexShrink: 0 }} />
+
+        {/* Tempo Restante */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '80px' }}>
+          <span style={{ 
+            fontSize: '28px', 
+            fontWeight: 900, 
+            fontFamily: '"Outfit", sans-serif',
+            lineHeight: 1,
+            color: state.timeRemaining <= 300 ? '#ff4d4d' : '#ffffff',
+            textShadow: state.timeRemaining <= 300 ? '0 0 15px rgba(255,77,77,0.5)' : 'none',
+            letterSpacing: '-0.03em',
+            animation: state.timeRemaining <= 300 ? 'pulse 1s infinite' : 'none'
+          }}>
+            {formatTime(state.timeRemaining).substring(0, 5)}
+            <span style={{ fontSize: '14px', opacity: 0.7, marginLeft: '1px' }}>
+              :{formatTime(state.timeRemaining).substring(6, 8)}
+            </span>
+          </span>
+          <span style={{ fontSize: '8px', fontWeight: 800, color: 'rgba(216, 180, 254, 0.6)', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '2px' }}>
+            Tempo Restante
+          </span>
         </div>
 
-        {/* Botão de Sair */}
-        <button
-          onClick={() => setShowExitModal(true)}
-          className="bg-red-500 hover:bg-red-600 text-white p-2.5 rounded-xl transition-all hover:scale-110 active:scale-90 shadow-lg"
-          title="Encerrar Sessão"
-        >
-          <LogOut size={20} />
-        </button>
+        {/* Ações — Sem Drag */}
+        <div style={{ display: 'flex', gap: '8px', flexShrink: 0, WebkitAppRegion: 'no-drag' as any } as React.CSSProperties}>
+          <button
+            onClick={() => {
+              setEndSessionUsername('');
+              setEndSessionPassword('');
+              setEndSessionError('');
+              setEndSessionSuccess(null);
+              setShowEndSessionModal(true);
+            }}
+            title="Sair / Encerrar"
+            style={{
+              background: 'linear-gradient(to bottom, #f97316, #ea580c)',
+              border: 'none',
+              borderRadius: '12px',
+              color: '#fff',
+              width: '40px',
+              height: '40px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: '0 4px 15px rgba(234, 88, 12, 0.3)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px) scale(1.05)';
+              e.currentTarget.style.boxShadow = '0 6px 20px rgba(234, 88, 12, 0.5)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0) scale(1)';
+              e.currentTarget.style.boxShadow = '0 4px 15px rgba(234, 88, 12, 0.3)';
+            }}
+          >
+            <X size={20} strokeWidth={3} />
+          </button>
+        </div>
+
+        {/* Alça de Arrastar (Visual) */}
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '2px', 
+          opacity: 0.3, 
+          paddingLeft: '4px' 
+        }}>
+          {[1,2,3].map(i => <div key={i} style={{ width: '3px', height: '3px', background: '#fff', borderRadius: '50%' }} />)}
+        </div>
       </div>
 
-      {/* Mensagens do servidor flutuantes */}
+      {/* Mensagem flutuante do servidor — aparece abaixo do HUD */}
       {state.message && (
-        <div className="mt-2 bg-yellow-400 text-yellow-900 px-4 py-2 rounded-xl text-xs font-bold shadow-xl animate-bounce pointer-events-auto">
+        <div
+          style={{
+            position: 'fixed',
+            top: '80px',
+            right: '12px',
+            background: '#fbbf24',
+            color: '#78350f',
+            padding: '10px 16px',
+            borderRadius: '12px',
+            fontSize: '13px',
+            fontWeight: 800,
+            boxShadow: '0 8px 20px rgba(0,0,0,0.3)',
+            zIndex: 1000,
+            animation: 'bounce 1s infinite',
+          }}
+        >
           📢 {state.message}
         </div>
       )}
 
-      {/* Modais (Config e Saída) */}
-      <button
-        onClick={() => {
-          setSettingsLoginStep('login');
-          setSettingsUsername('');
-          setSettingsPassword('');
-          setSettingsError('');
-          setShowSettingsModal(true);
-        }}
-        className="fixed bottom-4 left-4 text-white/20 hover:text-white/60 transition-all pointer-events-auto"
-      >
-        ⚙️
-      </button>
-
+      {/* Modais */}
       {settingsUI}
       {exitUI}
+      {endSessionUI}
     </div>
   );
 };

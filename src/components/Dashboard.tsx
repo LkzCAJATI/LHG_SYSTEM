@@ -8,7 +8,11 @@ import {
 } from 'lucide-react';
 
 export function Dashboard() {
-  const { devices, updateDevice, addDevice, endSessionSavingTime, pauseSession, resumeSession } = useStore();
+  const { 
+    devices, updateDevice, addDevice, 
+    endSessionSavingTime, pauseSession, resumeSession,
+    customers, removeCredits, startSession 
+  } = useStore();
   const { 
     isServerRunning, 
     connectedClients,
@@ -31,6 +35,12 @@ export function Dashboard() {
     type: 'pc' as 'pc' | 'console' | 'arcade',
     pricePerHour: 5,
   });
+
+  const [showCreditModal, setShowCreditModal] = useState(false);
+  const [creditCustomerSearch, setCreditCustomerSearch] = useState('');
+  const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<any>(null);
+  const [creditHours, setCreditHours] = useState(1);
+  const [showCreditSuggestions, setShowCreditSuggestions] = useState(false);
 
   // Estado do tempo em sessão
   const [sessionTimes, setSessionTimes] = useState<Record<string, string>>({});
@@ -135,6 +145,38 @@ export function Dashboard() {
     if (confirm(`Tem certeza que deseja REINICIAR ${deviceName}?`)) {
       await restartDevice(deviceId);
     }
+  };
+
+  const handleStartWithCredits = async () => {
+    if (!selectedDevice || !selectedCreditCustomer) return;
+
+    const minutesToUse = creditHours * 60;
+    if (selectedCreditCustomer.credits < minutesToUse) {
+      alert('Cliente não possui créditos suficientes!');
+      return;
+    }
+
+    // 1. Remover créditos do cliente
+    removeCredits(selectedCreditCustomer.id, minutesToUse);
+
+    // 2. Iniciar sessão
+    startSession(
+      selectedDevice.id, 
+      selectedCreditCustomer.name, 
+      creditHours, 
+      0, 
+      selectedCreditCustomer.id
+    );
+
+    // 3. Desbloquear máquina se for PC
+    if (selectedDevice.type === 'pc') {
+      await unlockDevice(selectedDevice.id);
+    }
+
+    setShowCreditModal(false);
+    setSelectedDevice(null);
+    setSelectedCreditCustomer(null);
+    setCreditCustomerSearch('');
   };
 
   const availableDevices = devices.filter(d => d.status === 'available').length;
@@ -585,6 +627,15 @@ export function Dashboard() {
 
             {/* Ações */}
             <div className="mt-6 space-y-2">
+              {selectedDevice.status === 'available' && (
+                <button
+                  onClick={() => setShowCreditModal(true)}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-lg transition-all transform hover:scale-[1.02]"
+                >
+                  <Unlock className="w-5 h-5" />
+                  Liberar com Créditos
+                </button>
+              )}
               {selectedDevice.status === 'in_use' && (
                 <button
                   onClick={() => {
@@ -668,6 +719,140 @@ export function Dashboard() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Lançar Créditos */}
+      {showCreditModal && selectedDevice && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]" onClick={() => setShowCreditModal(false)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-100 rounded-lg text-indigo-600">
+                  <Unlock className="w-6 h-6" />
+                </div>
+                <h2 className="text-xl font-bold text-gray-800">Liberar com Créditos</h2>
+              </div>
+              <button onClick={() => setShowCreditModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="space-y-5">
+              <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <p className="text-sm text-gray-500">Dispositivo selecionado:</p>
+                <p className="font-bold text-gray-800">{selectedDevice.name}</p>
+              </div>
+
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Buscar Cliente</label>
+                <input
+                  type="text"
+                  value={creditCustomerSearch}
+                  onChange={(e) => {
+                    setCreditCustomerSearch(e.target.value);
+                    setSelectedCreditCustomer(null);
+                    setShowCreditSuggestions(true);
+                  }}
+                  onFocus={() => setShowCreditSuggestions(true)}
+                  placeholder="Digite o nome do cliente..."
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                />
+
+                {showCreditSuggestions && creditCustomerSearch && (
+                  <div className="absolute z-[70] left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-2xl max-h-56 overflow-auto">
+                    {customers
+                      .filter(c => c.name.toLowerCase().includes(creditCustomerSearch.toLowerCase()))
+                      .map(customer => (
+                        <button
+                          key={customer.id}
+                          onClick={() => {
+                            setCreditCustomerSearch(customer.name);
+                            setSelectedCreditCustomer(customer);
+                            setShowCreditSuggestions(false);
+                          }}
+                          className="w-full text-left px-4 py-4 hover:bg-indigo-50 border-b border-gray-50 last:border-0 transition-colors flex items-center justify-between"
+                        >
+                          <div>
+                            <p className="font-bold text-gray-800">{customer.name}</p>
+                            <p className="text-xs text-gray-400">{customer.phone || 'Sem telefone'}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-black text-indigo-600">
+                              {(customer.credits / 60).toFixed(1)}h
+                            </p>
+                            <p className="text-[10px] text-gray-400">Saldo</p>
+                          </div>
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              {selectedCreditCustomer && (
+                <div className="animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-4">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="text-xs text-indigo-600 font-bold uppercase tracking-wider">Saldo Disponível</p>
+                        <p className="text-2xl font-black text-indigo-900">
+                          {selectedCreditCustomer.credits} <span className="text-sm font-normal">minutos</span>
+                        </p>
+                      </div>
+                      <div className="text-right">
+                         <p className="text-xl font-bold text-indigo-700">
+                           {(selectedCreditCustomer.credits / 60).toFixed(1)}h
+                         </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">Quanto tempo liberar?</label>
+                    <div className="flex items-center justify-between bg-gray-100 rounded-2xl p-2">
+                       <button 
+                         onClick={() => setCreditHours(Math.max(0.5, creditHours - 0.5))}
+                         className="w-12 h-12 rounded-xl bg-white shadow-sm hover:bg-gray-50 flex items-center justify-center text-xl font-bold text-gray-600 transition-all"
+                       >
+                         -
+                       </button>
+                       <div className="text-center">
+                         <span className="text-3xl font-black text-gray-800">{creditHours}</span>
+                         <span className="text-lg font-bold text-gray-400 ml-1">horas</span>
+                       </div>
+                       <button 
+                         onClick={() => setCreditHours(creditHours + 0.5)}
+                         className="w-12 h-12 rounded-xl bg-white shadow-sm hover:bg-gray-50 flex items-center justify-center text-xl font-bold text-gray-600 transition-all"
+                       >
+                         +
+                       </button>
+                    </div>
+                    {creditHours * 60 > selectedCreditCustomer.credits && (
+                      <p className="text-red-500 text-xs mt-2 font-bold flex items-center gap-1">
+                        <X className="w-3 h-3" /> Saldo insuficiente para este tempo!
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-8">
+              <button
+                onClick={() => setShowCreditModal(false)}
+                className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleStartWithCredits}
+                disabled={!selectedCreditCustomer || (creditHours * 60 > selectedCreditCustomer.credits)}
+                className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-200 disabled:shadow-none"
+              >
+                Liberar Agora
+              </button>
+            </div>
           </div>
         </div>
       )}

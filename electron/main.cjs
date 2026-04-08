@@ -25,13 +25,15 @@ function getDataPaths() {
   const dataDir = path.join(userData, DATA_DIR_NAME);
   const dataFile = path.join(dataDir, DATA_FILE_NAME);
   const backupDir = path.join(dataDir, BACKUP_DIR_NAME);
-  return { dataDir, dataFile, backupDir };
+  const docsDir = path.join(dataDir, "lhg_documentos");
+  return { dataDir, dataFile, backupDir, docsDir };
 }
 
 async function ensureDataDirs() {
-  const { dataDir, backupDir } = getDataPaths();
+  const { dataDir, backupDir, docsDir } = getDataPaths();
   await fsp.mkdir(dataDir, { recursive: true });
   await fsp.mkdir(backupDir, { recursive: true });
+  await fsp.mkdir(docsDir, { recursive: true });
 }
 
 function migrateStoredPayload(raw) {
@@ -195,17 +197,23 @@ function registerIpcHandlers() {
       win.setKiosk(true);
       win.setAlwaysOnTop(true, "screen-saver");
       win.setFullScreen(true);
+      win.setResizable(false);
+      win.setSkipTaskbar(true);
     } else if (mode === "floating") {
       const { screen } = require("electron");
       const primaryDisplay = screen.getPrimaryDisplay();
       const { width } = primaryDisplay.workAreaSize;
-      
+
       win.setKiosk(false);
       win.setFullScreen(false);
-      win.setAlwaysOnTop(true, "status");
-      win.setSize(320, 80);
-      // Posicionar no topo direito
-      win.setPosition(width - 340, 20);
+      win.setResizable(false);
+      win.setSkipTaskbar(true);
+      // Janela compacta sem borda, transparente, sempre no topo
+      win.setSize(280, 64);
+      win.setAlwaysOnTop(true, "screen-saver", 1);
+      // Canto superior direito com margem de 12px
+      win.setPosition(width - 292, 12);
+      win.setBackgroundColor("#00000000");
     }
   });
 
@@ -222,13 +230,95 @@ function registerIpcHandlers() {
 
   ipcMain.on("lhg:network:login-response", (_, { deviceId, success, message }) => {
     const socket = connectedSockets.get(deviceId);
-    if (socket && socket.readyState === WebSocket.OPEN) {
+    if (socket && socket.readyState === 1) { // 1 = OPEN
       socket.send(JSON.stringify({
         type: "login_response",
         success,
         message
       }));
     }
+  });
+
+  // Novos handlers para Acesso Remoto
+  ipcMain.handle("lhg:remote:get-sources", async () => {
+    const { desktopCapturer } = require("electron");
+    const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 0, height: 0 } });
+    return sources.map(s => ({ id: s.id, name: s.name }));
+  });
+
+  ipcMain.handle("lhg:remote:input", async (_, { deviceId, input }) => {
+    const ws = connectedSockets.get(deviceId);
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: "remote_input", input }));
+      return { ok: true };
+    }
+    return { ok: false, error: "Offline" };
+  });
+
+  // Executar input localmente (quando este PC for o cliente recebendo comando do servidor)
+  ipcMain.on("lhg:remote:execute-input", (_, { input }) => {
+    const { type, x, y, key } = input;
+    
+    // Usando PowerShell para simular input sem dependências nativas pesadas
+    let psCommand = "";
+    if (type === "mousemove" || type === "mousedown" || type === "mouseup") {
+      const clickType = type === "mousedown" ? "0x0002" : (type === "mouseup" ? "0x0004" : "0x0001");
+      psCommand = `
+        $win32 = Add-Type -MemberDefinition @'
+          [DllImport("user32.dll")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
+          [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+'@ -Name "Win32" -Namespace Win32 -PassThru
+        [Win32.Win32]::SetCursorPos(${Math.round(x)}, ${Math.round(y)})
+        if ("${type}" -ne "mousemove") {
+          [Win32.Win32]::mouse_event(${clickType}, 0, 0, 0, 0)
+        }
+      `;
+    } else if (type === "keydown") {
+      // Simulação básica de teclado (pode ser expandida conforme necessário)
+      psCommand = `[void][System.Windows.Forms.SendKeys]::SendWait("${key}")`;
+    }
+
+    if (psCommand) {
+      const { exec } = require("child_process");
+      exec(`powershell -Command "${psCommand.replace(/\n/g, "")}"`, (err) => {
+        if (err) console.error("Erro ao executar input remoto:", err);
+      });
+    }
+  });
+
+  // Gestão de Documentos (Anexos)
+  ipcMain.handle("lhg:docs:save", async (_, { sourcePath, originalName }) => {
+    try {
+      await ensureDataDirs();
+      const { docsDir } = getDataPaths();
+      const ext = path.extname(originalName);
+      const filename = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}${ext}`;
+      const destPath = path.join(docsDir, filename);
+      
+      await fsp.copyFile(sourcePath, destPath);
+      return { ok: true, filename, path: destPath };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  });
+
+  ipcMain.handle("lhg:docs:open", async (_, { filename }) => {
+    const { docsDir } = getDataPaths();
+    const fullPath = path.join(docsDir, filename);
+    const { shell } = require("electron");
+    await shell.openPath(fullPath);
+    return { ok: true };
+  });
+
+  ipcMain.handle("lhg:docs:select", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openFile"],
+      filters: [
+        { name: "Documentos", extensions: ["pdf", "jpg", "png", "jpeg"] }
+      ]
+    });
+    if (result.canceled) return null;
+    return { path: result.filePaths[0], name: path.basename(result.filePaths[0]) };
   });
 }
 
@@ -329,12 +419,22 @@ function getInstallMode() {
 
 async function createWindow() {
   const installMode = await getInstallMode();
+
+  const isClient = installMode === "client";
+
   const win = new BrowserWindow({
-    width: installMode === "client" ? 1366 : 1280,
-    height: installMode === "client" ? 768 : 800,
-    kiosk: installMode === "client",
-    autoHideMenuBar: installMode === "client",
-    alwaysOnTop: installMode === "client",
+    width: isClient ? 1366 : 1280,
+    height: isClient ? 768 : 800,
+    kiosk: isClient,
+    autoHideMenuBar: isClient,
+    alwaysOnTop: isClient,
+    // Quando for client, inicia sem frame e transparente
+    // (será controlado dinamicamente pelo setMode)
+    frame: !isClient,
+    transparent: isClient,
+    backgroundColor: isClient ? "#00000000" : "#1a1a2e",
+    skipTaskbar: isClient,
+    resizable: !isClient,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -342,7 +442,7 @@ async function createWindow() {
     }
   });
 
-  if (installMode === "client") {
+  if (isClient) {
     app.setLoginItemSettings({
       openAtLogin: true,
       path: process.execPath

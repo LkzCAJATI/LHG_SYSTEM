@@ -2,11 +2,10 @@ import { useState, useRef } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
 
 export default function Settings() {
-  const { settings, updateSettings, setLogo, setSystemBackground, setClientWallpaper, setSystemName } = useSettingsStore();
-  const [activeTab, setActiveTab] = useState<'appearance' | 'prices' | 'printer' | 'advanced'>('appearance');
+  const { settings, updateSettings, setLogo, setClientWallpaper, setSystemName } = useSettingsStore();
+  const [activeTab, setActiveTab] = useState<'appearance' | 'prices' | 'documents' | 'printer' | 'advanced'>('appearance');
   
   const logoInputRef = useRef<HTMLInputElement>(null);
-  const backgroundInputRef = useRef<HTMLInputElement>(null);
   const wallpaperInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageUpload = (
@@ -31,6 +30,7 @@ export default function Settings() {
   const tabs = [
     { id: 'appearance', label: '🎨 Aparência', icon: '🎨' },
     { id: 'prices', label: '💰 Preços', icon: '💰' },
+    { id: 'documents', label: '📄 Documentos', icon: '📄' },
     { id: 'printer', label: '🖨️ Impressão', icon: '🖨️' },
     { id: 'advanced', label: '⚙️ Avançado', icon: '⚙️' },
   ];
@@ -132,47 +132,6 @@ export default function Settings() {
               </p>
             </div>
 
-            {/* Fundo do Sistema */}
-            <div className="bg-gray-700 rounded-lg p-4">
-              <label className="block text-gray-300 text-sm font-medium mb-2">
-                🎨 Fundo do Sistema (Painel Admin)
-              </label>
-              <div className="flex items-center gap-4">
-                <div className="w-24 h-16 bg-gray-600 rounded-lg flex items-center justify-center overflow-hidden border-2 border-dashed border-gray-500">
-                  {settings.systemBackground ? (
-                    <img src={settings.systemBackground} alt="Background" className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="text-gray-400 text-xs text-center">Padrão</span>
-                  )}
-                </div>
-                <div className="flex-1 space-y-2">
-                  <input
-                    type="file"
-                    ref={backgroundInputRef}
-                    accept="image/*"
-                    onChange={(e) => handleImageUpload(e, setSystemBackground)}
-                    className="hidden"
-                  />
-                  <button
-                    onClick={() => backgroundInputRef.current?.click()}
-                    className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition flex items-center justify-center gap-2"
-                  >
-                    <span>📤</span> Enviar Fundo
-                  </button>
-                  {settings.systemBackground && (
-                    <button
-                      onClick={() => setSystemBackground(null)}
-                      className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
-                    >
-                      🗑️ Remover Fundo
-                    </button>
-                  )}
-                </div>
-              </div>
-              <p className="text-gray-400 text-sm mt-2">
-                Imagem de fundo do painel administrativo
-              </p>
-            </div>
 
             {/* Papel de Parede dos PCs */}
             <div className="bg-gray-700 rounded-lg p-4">
@@ -197,9 +156,9 @@ export default function Settings() {
                   />
                   <button
                     onClick={() => wallpaperInputRef.current?.click()}
-                    className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition flex items-center justify-center gap-2"
+                    className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center justify-center gap-2 font-bold shadow-lg"
                   >
-                    <span>📤</span> Enviar Papel de Parede
+                    <span>📤</span> Atualizar e Enviar para PCs
                   </button>
                   {settings.clientWallpaper && (
                     <button
@@ -339,7 +298,67 @@ export default function Settings() {
           </div>
         )}
 
-        {/* Impressão */}
+        {/* Documentos */}
+        {activeTab === 'documents' && (
+          <div className="space-y-6">
+            <h3 className="text-lg font-semibold text-white mb-4">📄 Modelos de Documentos</h3>
+            
+            <div className="bg-indigo-900/30 border border-indigo-700 rounded-lg p-4 mb-6">
+              <h4 className="text-indigo-400 font-medium mb-2 flex items-center gap-2">
+                <span>💡</span> Dica: Variáveis Dinâmicas
+              </h4>
+              <p className="text-gray-300 text-sm mb-2">
+                Use as etiquetas abaixo no texto para que o sistema preencha automaticamente:
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {['LOJA', 'CLIENTE', 'VALOR_TOTAL', 'FORMA_PAGAMENTO', 'OBJETO'].map(tag => (
+                  <code key={tag} className="bg-gray-800 text-purple-400 px-2 py-1 rounded text-xs">
+                    {'{{' + tag + '}}'}
+                  </code>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6">
+              <div className="bg-gray-700 rounded-lg p-4">
+                <label className="block text-gray-300 text-sm font-medium mb-2">📜 Contrato de Venda Parcelada</label>
+                <textarea
+                  value={settings.saleContractTemplate}
+                  onChange={(e) => updateSettings({ saleContractTemplate: e.target.value })}
+                  className="w-full h-48 bg-gray-600 border border-gray-500 rounded-lg px-4 py-2 text-white focus:border-purple-500 focus:outline-none font-mono text-sm"
+                />
+              </div>
+
+              <div className="bg-gray-700 rounded-lg p-4">
+                <label className="block text-gray-300 text-sm font-medium mb-2">🤝 Contrato de Recompra (Troca)</label>
+                <textarea
+                  value={settings.purchaseContractTemplate}
+                  onChange={(e) => updateSettings({ purchaseContractTemplate: e.target.value })}
+                  className="w-full h-48 bg-gray-600 border border-gray-500 rounded-lg px-4 py-2 text-white focus:border-purple-500 focus:outline-none font-mono text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-gray-700 rounded-lg p-4">
+                  <label className="block text-gray-300 text-sm font-medium mb-2">🛠️ Termos de OS</label>
+                  <textarea
+                    value={settings.osTermsTemplate}
+                    onChange={(e) => updateSettings({ osTermsTemplate: e.target.value })}
+                    className="w-full h-32 bg-gray-600 border border-gray-500 rounded-lg px-4 py-2 text-white focus:border-purple-500 focus:outline-none text-sm"
+                  />
+                </div>
+                <div className="bg-gray-700 rounded-lg p-4">
+                  <label className="block text-gray-300 text-sm font-medium mb-2">💳 Regras de Pagamento (Orçamento)</label>
+                  <textarea
+                    value={settings.budgetRulesTemplate}
+                    onChange={(e) => updateSettings({ budgetRulesTemplate: e.target.value })}
+                    className="w-full h-32 bg-gray-600 border border-gray-500 rounded-lg px-4 py-2 text-white focus:border-purple-500 focus:outline-none text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {activeTab === 'printer' && (
           <div className="space-y-6">
             <h3 className="text-lg font-semibold text-white mb-4">🖨️ Configurações de Impressão</h3>

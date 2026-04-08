@@ -6,6 +6,12 @@ contextBridge.exposeInMainWorld("lhgSystem", {
   createBackup: () => ipcRenderer.invoke("lhg:state:backup"),
   getInfo: () => ipcRenderer.invoke("lhg:info"),
   quitApp: () => ipcRenderer.invoke("lhg:app:quit"),
+  copy: (text) => ipcRenderer.send('lhg:app:copy', text),
+  docs: {
+    select: () => ipcRenderer.invoke('lhg:docs:select'),
+    save: (data) => ipcRenderer.invoke('lhg:docs:save', data),
+    open: (filename) => ipcRenderer.invoke('lhg:docs:open', { filename }),
+  },
   
   // Handlers de Rede
   sendNetworkCommand: (command) => ipcRenderer.invoke("lhg:network:command", command),
@@ -19,12 +25,14 @@ contextBridge.exposeInMainWorld("lhgSystem", {
   getServerStatus: () => ipcRenderer.invoke("lhg:network:get-server-status"),
   
   // Handlers de Login Remoto
-  onLoginRequest: (callback) => {
-    const subscription = (event, data) => callback(data);
-    ipcRenderer.on("lhg:network:login-request", subscription);
-    return () => ipcRenderer.removeListener("lhg:network:login-request", subscription);
-  },
+  onLoginRequest: (callback) => ipcRenderer.on("lhg:network:login-request", (_, data) => callback(data)),
   sendLoginResponse: (data) => ipcRenderer.send("lhg:network:login-response", data),
+  
+  // Acesso Remoto
+  getScreenSources: () => ipcRenderer.invoke("lhg:remote:get-sources"),
+  sendRemoteInput: (data) => ipcRenderer.invoke("lhg:remote:input", data),
+  onRemoteInput: (callback) => ipcRenderer.on("lhg:remote:input", (_, data) => callback(data)),
+  executeRemoteInput: (input) => ipcRenderer.send("lhg:remote:execute-input", { input }),
   
   // Handlers de Visual/Janela
   broadcastWallpaper: (data) => ipcRenderer.send("lhg:network:broadcast-wallpaper", data),

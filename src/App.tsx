@@ -12,6 +12,7 @@ import { Reports } from './components/Reports';
 import { Users } from './components/Users';
 import Network from './components/Network';
 import Settings from './components/Settings';
+import ServiceOrders from './components/ServiceOrders';
 import ClientView from './components/ClientView';
 
 interface AppProps {
@@ -54,6 +55,8 @@ function App({ installMode = 'server' }: AppProps) {
         return <Users />;
       case 'network':
         return <Network />;
+      case 'service-orders':
+        return <ServiceOrders />;
       case 'settings':
         return <Settings />;
       default:

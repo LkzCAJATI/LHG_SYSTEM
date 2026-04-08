@@ -2,11 +2,14 @@ import { useState, useMemo } from 'react';
 import { useStore } from '../store/useStore';
 import {
   BarChart3, Calendar, DollarSign, Package, TrendingUp,
-  Filter
+  Filter, Printer, FileText, Paperclip, CreditCard
 } from 'lucide-react';
+import { generateReceiptPDF, generateContractPDF, generateInstallmentBookletPDF } from '../utils/pdfGenerator';
+import { useSettingsStore } from '../store/settingsStore';
 
 export function Reports() {
   const { sales, products } = useStore();
+  const { settings } = useSettingsStore();
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('today');
   const [reportType, setReportType] = useState<'sales' | 'stock' | 'financial'>('sales');
 
@@ -280,12 +283,48 @@ export function Reports() {
           </h3>
           <div className="space-y-3 max-h-64 overflow-auto">
             {filteredSales.slice(-10).reverse().map(sale => (
-              <div key={sale.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <p className="font-medium">#{sale.id.slice(0, 8).toUpperCase()}</p>
-                  <p className="text-sm text-gray-500">
-                    {new Date(sale.createdAt).toLocaleString()}
-                  </p>
+              <div key={sale.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg group">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => generateReceiptPDF(sale, settings, 'print')}
+                      className="p-2 bg-white rounded-lg shadow-sm text-purple-600 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-purple-50"
+                      title="Re-imprimir Recibo"
+                    >
+                      <Printer className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => generateContractPDF(sale, settings, 'venda')}
+                      className="p-2 bg-white rounded-lg shadow-sm text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-indigo-50"
+                      title="Gerar Contrato"
+                    >
+                      <FileText className="w-4 h-4" />
+                    </button>
+                    {sale.paymentMethod === 'installment' && (
+                      <button
+                        onClick={() => generateInstallmentBookletPDF(sale, settings)}
+                        className="p-2 bg-white rounded-lg shadow-sm text-green-600 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-green-50"
+                        title="Gerar Carnê (Parcelas)"
+                      >
+                        <CreditCard className="w-4 h-4" />
+                      </button>
+                    )}
+                    {sale.attachments && sale.attachments.length > 0 && (
+                      <button
+                        onClick={() => window.lhgSystem?.docs?.open(sale.attachments![0])}
+                        className="p-2 bg-indigo-100 rounded-lg text-indigo-700 shadow-sm"
+                        title="Ver Documento Anexado"
+                      >
+                        <Paperclip className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-medium">#{sale.id.slice(0, 8).toUpperCase()}</p>
+                    <p className="text-sm text-gray-500">
+                      {new Date(sale.createdAt).toLocaleString()}
+                    </p>
+                  </div>
                 </div>
                 <div className="text-right">
                   <p className="font-bold text-green-600">{formatCurrency(sale.total)}</p>

@@ -20,22 +20,15 @@ export function Layout({ children }: LayoutProps) {
     { id: 'products', label: 'Estoque', icon: Package },
     { id: 'customers', label: 'Clientes', icon: Users },
     { id: 'budgets', label: 'Orçamentos', icon: FileText },
+    { id: 'service-orders', label: 'Ordens de Serviço', icon: Monitor },
     { id: 'reports', label: 'Relatórios', icon: BarChart3 },
     { id: 'network', label: 'Rede', icon: Wifi },
     { id: 'users', label: 'Usuários', icon: Settings },
     { id: 'settings', label: 'Configurações', icon: Settings },
   ];
 
-  const backgroundStyle = settings.systemBackground 
-    ? { backgroundImage: `url(${settings.systemBackground})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : {};
-
   return (
-    <div className="min-h-screen bg-gray-900 flex" style={backgroundStyle}>
-      {/* Overlay para melhor legibilidade */}
-      {settings.systemBackground && (
-        <div className="fixed inset-0 bg-black/70" />
-      )}
+    <div className="min-h-screen bg-gray-900 flex">
       
       {/* Sidebar */}
       <aside className="w-64 bg-gray-900/95 backdrop-blur text-white flex flex-col relative z-10">

@@ -7,7 +7,6 @@ interface SystemSettings {
   logo: string | null;
   
   // Aparência
-  systemBackground: string | null;
   clientWallpaper: string | null;
   
   // Preços
@@ -27,13 +26,18 @@ interface SystemSettings {
   // Outros
   currency: string;
   lowStockAlert: number;
+  
+  // Modelos de Documentos
+  saleContractTemplate: string;
+  purchaseContractTemplate: string;
+  osTermsTemplate: string;
+  budgetRulesTemplate: string;
 }
 
 interface SettingsStore {
   settings: SystemSettings;
   updateSettings: (settings: Partial<SystemSettings>) => void;
   setLogo: (logo: string | null) => void;
-  setSystemBackground: (background: string | null) => void;
   setClientWallpaper: (wallpaper: string | null) => void;
   setSystemName: (name: string) => void;
 }
@@ -41,7 +45,6 @@ interface SettingsStore {
 const defaultSettings: SystemSettings = {
   systemName: 'LHG SYSTEM',
   logo: null,
-  systemBackground: null,
   clientWallpaper: null,
   pcPricePerHour: 5,
   consolePricePerHour: 6,
@@ -53,6 +56,10 @@ const defaultSettings: SystemSettings = {
   serverPort: 8080,
   currency: 'R$',
   lowStockAlert: 5,
+  saleContractTemplate: `CONTRATO DE COMPRA E VENDA PARCELADA\n\nPelo presente instrumento particular, as partes abaixo identificadas:\nVENDEDOR: {{LOJA}}\nCLIENTE (Comprador): {{CLIENTE}}\nCPF: {{CPF}}\n\ntêm entre si justo e contratado o seguinte:\n\nCLÁUSULA 1 - DO OBJETO\nO presente contrato tem como objeto a compra de {{OBJETO}} em perfeito funcionamento.\n\nCLÁUSULA 2 - DO VALOR\nO valor total do produto é de {{VALOR_TOTAL}}.\n\nCLÁUSULA 3 - DA FORMA DE PAGAMENTO\nO cliente pagará o valor da seguinte forma: {{FORMA_PAGAMENTO}}.\n\nCLÁUSULA 5 - DA GARANTIA\nO produto possui garantia de 90 dias contra defeitos de funcionamento.`,
+  purchaseContractTemplate: `CONTRATO DE RECOMPRA DE EQUIPAMENTO\n\nVENDEDOR: {{CLIENTE}}\nCOMPRADOR: {{LOJA}}\n\nOBJETO: Compra de {{OBJETO}} pela loja pelo valor de {{VALOR_TOTAL}} como parte de pagamento ou compra direta.`,
+  osTermsTemplate: `REGRAS DE ORÇAMENTO / CONSERTO\n- Este orçamento possui validade de 7 dias.\n- O serviço será iniciado somente após aprovação e entrada mínima de 50%.\n- Garantia de 3 meses para defeitos relacionados exclusivamente ao serviço realizado.`,
+  budgetRulesTemplate: `REGRAS DE PAGAMENTO\n- Aceitamos: PIX, Dinheiro, Cartão.\n- Parcelamentos no cartão sob consulta com acréscimo de taxas.`,
 };
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -66,10 +73,6 @@ export const useSettingsStore = create<SettingsStore>()(
       setLogo: (logo) =>
         set((state) => ({
           settings: { ...state.settings, logo },
-        })),
-      setSystemBackground: (background) =>
-        set((state) => ({
-          settings: { ...state.settings, systemBackground: background },
         })),
       setClientWallpaper: (wallpaper) =>
         set((state) => ({
