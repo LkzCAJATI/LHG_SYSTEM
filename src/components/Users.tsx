@@ -16,6 +16,7 @@ export function Users() {
     username: '',
     password: '',
     role: 'employee' as 'admin' | 'employee',
+    prefix: '',
   });
 
   const resetForm = () => {
@@ -24,6 +25,7 @@ export function Users() {
       username: '',
       password: '',
       role: 'employee',
+      prefix: '',
     });
     setEditingUser(null);
   };
@@ -36,6 +38,7 @@ export function Users() {
         name: formData.name,
         username: formData.username,
         role: formData.role,
+        prefix: (formData.prefix || editingUser.prefix || '').toUpperCase(),
       };
       if (formData.password) {
         updateData.password = formData.password;
@@ -47,6 +50,7 @@ export function Users() {
         username: formData.username,
         password: formData.password,
         role: formData.role,
+        prefix: (formData.prefix || formData.name?.trim()?.[0] || 'X').toUpperCase(),
       });
     }
 
@@ -61,6 +65,7 @@ export function Users() {
       username: user.username,
       password: '',
       role: user.role,
+      prefix: user.prefix || '',
     });
     setShowModal(true);
   };
@@ -141,6 +146,9 @@ export function Users() {
 
             <span className={`px-3 py-1 rounded-full text-xs font-medium ${getRoleColor(user.role)}`}>
               {getRoleLabel(user.role)}
+            </span>
+            <span className="ml-2 px-2 py-1 rounded-full text-xs font-mono bg-gray-100 text-gray-700">
+              {user.prefix || '?'}
             </span>
 
             {user.id === currentUser?.id && (
@@ -256,6 +264,33 @@ export function Users() {
                   className="w-full px-3 py-2 border rounded-lg"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Prefixo da OS/Orçamento (1 letra)
+                </label>
+                <input
+                  type="text"
+                  value={formData.prefix}
+                  onChange={(e) => {
+                    const v = (e.target.value || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
+                    setFormData(prev => ({ ...prev, prefix: v }));
+                  }}
+                  onBlur={() => {
+                    if (!formData.prefix) {
+                      const fallback = (formData.name?.trim()?.[0] || 'X').toUpperCase();
+                      setFormData(prev => ({ ...prev, prefix: fallback }));
+                    }
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg font-mono"
+                  placeholder="Ex: L"
+                  maxLength={1}
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Ex: Lucas = L → L-01, L-02...
+                </p>
               </div>
 
               <div>

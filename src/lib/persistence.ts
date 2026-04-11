@@ -15,6 +15,8 @@ function buildAppStateSnapshot() {
     cart: state.cart,
     customers: state.customers,
     budgets: state.budgets,
+    serviceOrders: state.serviceOrders,
+    nextExternalIds: state.nextExternalIds,
     cashRegister: state.cashRegister,
     cashHistory: state.cashHistory,
     currentPage: state.currentPage,

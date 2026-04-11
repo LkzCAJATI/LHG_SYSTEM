@@ -1,21 +1,25 @@
 import { useState, useRef } from 'react';
 import { useStore } from '../store/useStore';
+import { useNetworkStore } from '../store/networkStore';
 import { CashBills } from '../types';
 import {
   ShoppingCart, Plus, Minus, Trash2, CreditCard,
   Banknote, Smartphone, Gamepad2, Monitor, Package,
   Calculator, DollarSign, X, Barcode, Joystick, Zap, CheckCircle, Printer, FileText
 } from 'lucide-react';
-import { generateReceiptPDF } from '../utils/pdfGenerator';
+import { generatePDVCouponPDF, generateReceiptPDF } from '../utils/pdfGenerator';
 import { useSettingsStore } from '../store/settingsStore';
 
 export function Cashier() {
   const {
     devices, products, cart, cashRegister, customers,
     addToCart, removeFromCart, updateCartItem, clearCart,
-    createSale, openCashRegister, closeCashRegister, addCashMovement
+    createSale, openCashRegister, closeCashRegister, addCashMovement,
+    addTimeToSession, startSession
   } = useStore();
   const { settings } = useSettingsStore();
+  const sendPcUnlockStartSession = useNetworkStore((s) => s.sendPcUnlockStartSession);
+  const sendDeviceCommand = useNetworkStore((s) => s.sendDeviceCommand);
 
   const [showOpenCash, setShowOpenCash] = useState(false);
   const [showCloseCash, setShowCloseCash] = useState(false);
@@ -117,8 +121,15 @@ export function Cashier() {
     const product = products.find(p => p.id === productId);
     if (!product || product.quantity <= 0) return;
 
-    const existingItem = cart.find(item => item.productId === productId);
-    
+    const existingItem = cart.find(
+      (item) => item.type === 'product' && item.productId === productId
+    );
+    const inCart = existingItem?.quantity ?? 0;
+    if (inCart >= product.quantity) {
+      alert(`Estoque insuficiente. Disponível: ${product.quantity} un.`);
+      return;
+    }
+
     if (existingItem) {
       updateCartItem(existingItem.id, {
         quantity: existingItem.quantity + 1,
@@ -138,24 +149,56 @@ export function Cashier() {
 
   const handleBarcodeSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!barcodeSearch.trim()) return;
+    const q = barcodeSearch.trim();
+    if (!q) return;
 
-    const product = products.find(p => 
-      p.barcode && p.barcode.toLowerCase() === barcodeSearch.toLowerCase()
+    const withStock = products.filter((p) => p.quantity > 0);
+    let product: (typeof products)[0] | undefined;
+
+    const byBarcode = withStock.find(
+      (p) => p.barcode && p.barcode.toLowerCase() === q.toLowerCase()
     );
+    if (byBarcode) {
+      product = byBarcode;
+    } else {
+      const qLower = q.toLowerCase();
+      const byExactName = withStock.find(
+        (p) => p.name.trim().toLowerCase() === qLower
+      );
+      if (byExactName) {
+        product = byExactName;
+      } else {
+        const byPartialName = withStock.filter((p) =>
+          p.name.toLowerCase().includes(qLower)
+        );
+        if (byPartialName.length === 1) {
+          product = byPartialName[0];
+        } else if (byPartialName.length === 0) {
+          alert('Produto não encontrado ou sem estoque!');
+          return;
+        } else {
+          alert(
+            `Vários produtos correspondem a "${q}":\n${byPartialName
+              .slice(0, 8)
+              .map((p) => `• ${p.name}`)
+              .join('\n')}${byPartialName.length > 8 ? '\n...' : ''}\n\nSeja mais específico ou use o código de barras.`
+          );
+          return;
+        }
+      }
+    }
 
-    if (product && product.quantity > 0) {
+    if (product) {
       handleAddProduct(product.id);
       setBarcodeSearch('');
       barcodeInputRef.current?.focus();
-    } else {
-      alert('Produto não encontrado ou sem estoque!');
     }
   };
 
   const handleFinishSale = () => {
     if (cart.length === 0) return;
     if (paymentMethod === 'cash' && Number(cashReceived) < total) return;
+    const timeItems = cart.filter((item) => item.type === 'time' && item.deviceId);
 
     const sale = createSale(
       paymentMethod, 
@@ -163,8 +206,38 @@ export function Cashier() {
       downPayment.amount > 0 ? { ...downPayment, date: new Date() } : undefined
     );
     if (sale) {
-      // Generate fiscal receipt and open print flow
-      generateReceiptPDF(sale, settings, 'print');
+      // Aplicar tempo vendido no PDV e liberar/atualizar o client automaticamente.
+      timeItems.forEach((item) => {
+        if (!item.deviceId || !item.duration) return;
+        const device = devices.find((d) => d.id === item.deviceId);
+        if (!device) return;
+
+        const minutesToAdd = Math.max(1, Math.floor(item.duration * 60));
+        const customerLabel = item.customerName || sale.customerName || 'Cliente';
+
+        // Se já existe sessão ativa, apenas adiciona tempo.
+        if (device.currentSession && (device.status === 'in_use' || device.status === 'paused')) {
+          addTimeToSession(device.id, minutesToAdd);
+          void sendDeviceCommand(device.id, { type: 'add_time', minutes: minutesToAdd });
+          if (device.status === 'paused') {
+            void sendDeviceCommand(device.id, { type: 'resume' });
+          }
+          return;
+        }
+
+        // Sem sessão ativa: inicia e envia comando completo para o client liberar na hora.
+        startSession(device.id, customerLabel, item.duration, item.extraControllers || 0, item.customerId);
+        const updatedDevice = useStore.getState().devices.find((d) => d.id === device.id);
+        const newSession = updatedDevice?.currentSession;
+        if (device.type === 'pc' && newSession?.id) {
+          void sendPcUnlockStartSession(device.id, newSession.id, minutesToAdd);
+        }
+      });
+
+      // Cupom térmico PDV: só pelo botão do modal (antes imprimia aqui + de novo no modal = duplicado).
+      if (sale.source === 'budget') {
+        generateReceiptPDF(sale, settings, 'print');
+      }
       setLastSale(sale);
       setShowPayment(false);
       setCashReceived('');
@@ -435,7 +508,7 @@ export function Cashier() {
               )}
             </h2>
             
-            {/* Busca por Código de Barras */}
+            {/* Busca por código de barras ou nome */}
             <form onSubmit={handleBarcodeSearch} className="mb-4">
               <div className="relative">
                 <Barcode className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -445,7 +518,7 @@ export function Cashier() {
                   value={barcodeSearch}
                   onChange={(e) => setBarcodeSearch(e.target.value)}
                   className="w-full pl-10 pr-24 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  placeholder="Escaneie o código de barras..."
+                  placeholder="Código de barras ou nome do produto..."
                   autoComplete="off"
                 />
                 <button
@@ -497,7 +570,11 @@ export function Cashier() {
                     R$ {item.totalPrice.toFixed(2)}
                   </p>
                 </div>
-                {item.type === 'product' && (
+                {item.type === 'product' && item.productId && (() => {
+                  const stockProduct = products.find((p) => p.id === item.productId);
+                  const maxQty = stockProduct?.quantity ?? 0;
+                  const atStockLimit = item.quantity >= maxQty;
+                  return (
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
@@ -516,18 +593,28 @@ export function Cashier() {
                     </button>
                     <span className="w-8 text-center">{item.quantity}</span>
                     <button
+                      type="button"
+                      disabled={atStockLimit}
+                      title={atStockLimit ? `Máx. ${maxQty} un. em estoque` : 'Aumentar'}
                       onClick={() => {
+                        if (!stockProduct || item.quantity >= stockProduct.quantity) {
+                          alert(
+                            `Estoque insuficiente. Disponível: ${stockProduct?.quantity ?? 0} un.`
+                          );
+                          return;
+                        }
                         updateCartItem(item.id, {
                           quantity: item.quantity + 1,
                           totalPrice: (item.quantity + 1) * item.unitPrice,
                         });
                       }}
-                      className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center"
+                      className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gray-200"
                     >
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
-                )}
+                  );
+                })()}
                 <button
                   onClick={() => removeFromCart(item.id)}
                   className="w-8 h-8 rounded-full bg-red-100 hover:bg-red-200 flex items-center justify-center text-red-600"
@@ -1036,11 +1123,17 @@ export function Cashier() {
 
             <div className="space-y-3">
               <button
-                onClick={() => generateReceiptPDF(lastSale, settings, 'print')}
+                onClick={() => {
+                  if (lastSale.source === 'budget') {
+                    generateReceiptPDF(lastSale, settings, 'print');
+                  } else {
+                    generatePDVCouponPDF(lastSale, settings, 'print');
+                  }
+                }}
                 className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 flex items-center justify-center gap-2 shadow-lg shadow-purple-100 transition-all active:scale-95"
               >
                 <Printer className="w-5 h-5" />
-                Imprimir Recibo
+                Imprimir Cupom
               </button>
               <button
                 onClick={() => {

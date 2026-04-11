@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>LHG - Monitor Mobile</title>
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="LHG Monitor">
+    <meta name="format-detection" content="telephone=no">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="pwa-icon.png" sizes="180x180">
+    <link rel="icon" type="image/png" sizes="192x192" href="pwa-icon.png">
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --danger: #ef4444;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --bg: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text: #f8fafc;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 20px;
+            padding-top: calc(20px + env(safe-area-inset-top, 0px));
+            padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+            min-height: 100vh;
+            background-image: radial-gradient(circle at top right, #1e1b4b, var(--bg));
+        }
+
+        header {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            margin-bottom: 22px;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .status-online { color: var(--success); border-color: rgba(16, 185, 129, 0.3); }
+        .status-offline { color: var(--danger); border-color: rgba(239, 68, 68, 0.3); }
+
+        .brand-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            grid-column: 2;
+            text-align: center;
+        }
+
+        .brand-logo {
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            object-fit: contain;
+            background: rgba(255, 255, 255, 0.08);
+            padding: 2px;
+            display: none;
+        }
+
+        #connection-status {
+            justify-self: end;
+            grid-column: 3;
+        }
+
+        .device-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+
+        /* Lista principal agrupada por modelo */
+        .list-section {
+            margin-bottom: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 18px;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.12);
+        }
+        .list-section-head {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 16px;
+            border: none;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            font-family: inherit;
+            cursor: pointer;
+            text-align: left;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .list-section-head:active {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .list-section-head-main {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 3px;
+            min-width: 0;
+        }
+        .list-section-title {
+            font-size: 0.98rem;
+            font-weight: 700;
+        }
+        .list-section-meta {
+            font-size: 0.72rem;
+            font-weight: 600;
+            opacity: 0.72;
+        }
+        .list-section-chev {
+            flex-shrink: 0;
+            font-size: 0.65rem;
+            opacity: 0.7;
+            transition: transform 0.22s ease;
+        }
+        .list-section.collapsed .list-section-chev {
+            transform: rotate(-90deg);
+        }
+        .list-section-body {
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .list-section.collapsed .list-section-body {
+            display: none;
+        }
+
+        .device-list-root {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .device-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+
+        .badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255,255,255,0.06);
+            opacity: 0.95;
+        }
+
+        .badge-online { color: #86efac; border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.10); }
+        .badge-offline { color: #fecaca; border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.10); }
+        .badge-available { color: #a7f3d0; border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.10); }
+        .badge-inuse { color: #fde68a; border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
+        .badge-paused { color: #fdba74; border-color: rgba(249,115,22,0.35); background: rgba(249,115,22,0.10); }
+        .badge-maint { color: #fca5a5; border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.10); }
+
+        .device-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s;
+        }
+
+        .device-card:active {
+            transform: scale(0.98);
+        }
+
+        .device-card.alert {
+            border-color: var(--danger);
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+            animation: pulse-border 1.5s infinite;
+        }
+
+        @keyframes pulse-border {
+            0% { box-shadow: 0 0 0px rgba(239, 68, 68, 0.2); }
+            50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
+            100% { box-shadow: 0 0 0px rgba(239, 68, 68, 0.2); }
+        }
+
+        .device-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .device-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .time-box {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+
+        .time-remaining {
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .time-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            opacity: 0.6;
+            letter-spacing: 1px;
+        }
+
+        .progress-container {
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(to right, #4f46e5, #818cf8);
+            border-radius: 3px;
+            transition: width 1s linear;
+        }
+
+        .alert .progress-bar {
+            background: var(--danger);
+        }
+
+        .device-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            opacity: 0.7;
+        }
+
+        .btn-request {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 30px;
+            font-weight: 600;
+            box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4);
+            z-index: 100;
+            display: none;
+        }
+
+        #alarm-silencer {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: var(--danger);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            display: none;
+            font-weight: bold;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+
+        /* Empty states */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            opacity: 0.5;
+        }
+        .empty-state svg { width: 64px; height: 64px; margin-bottom: 20px; }
+
+        .transfer-card {
+            margin-top: 18px;
+            padding: 16px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 18px;
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(12px);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+        }
+
+        .transfer-title {
+            font-weight: 700;
+            margin-bottom: 12px;
+            font-size: 1rem;
+        }
+
+        .transfer-grid {
+            display: grid;
+            gap: 10px;
+        }
+
+        .transfer-control {
+            width: 100%;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(0,0,0,0.25);
+            color: var(--text);
+            font-size: 0.95rem;
+        }
+
+        .transfer-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .transfer-status {
+            font-size: 12px;
+            opacity: 0.8;
+            min-height: 16px;
+        }
+
+        .btn-transfer-all {
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(79,70,229,0.2);
+            color: #c7d2fe;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .btn-transfer-send {
+            width: 100%;
+            padding: 14px;
+            border-radius: 14px;
+            border: none;
+            background: var(--primary);
+            color: white;
+            font-weight: 800;
+        }
+
+        @media (max-width: 420px) {
+            body { padding: 14px; }
+            .transfer-row { flex-direction: column; align-items: stretch; }
+            .btn-transfer-all { width: 100%; }
+        }
+
+        /* Card clicável (abre ações) */
+        .device-card.touch-card {
+            cursor: pointer;
+            user-select: none;
+        }
+        .device-card.touch-card:focus {
+            outline: 2px solid rgba(129, 140, 248, 0.7);
+            outline-offset: 2px;
+        }
+        .tap-hint {
+            font-size: 0.7rem;
+            opacity: 0.55;
+            margin-top: 6px;
+            text-align: center;
+        }
+
+        /* Bottom sheet / modal */
+        .sheet-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.55);
+            z-index: 2000;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding: 0;
+        }
+        .sheet {
+            width: 100%;
+            max-width: 480px;
+            max-height: 88vh;
+            background: #1e293b;
+            border-radius: 22px 22px 0 0;
+            border: 1px solid rgba(255,255,255,0.12);
+            box-shadow: 0 -12px 40px rgba(0,0,0,0.45);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .sheet-header {
+            padding: 16px 18px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .sheet-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            line-height: 1.25;
+        }
+        .sheet-sub {
+            font-size: 0.78rem;
+            opacity: 0.75;
+            margin-top: 4px;
+        }
+        .sheet-close {
+            flex-shrink: 0;
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.06);
+            color: var(--text);
+            font-size: 1.4rem;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .sheet-body {
+            padding: 14px 16px 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        .sheet-actions {
+            display: grid;
+            gap: 10px;
+        }
+        .btn-sheet {
+            width: 100%;
+            padding: 14px 16px;
+            border-radius: 14px;
+            border: none;
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+        }
+        .btn-sheet-primary {
+            background: var(--primary);
+            color: white;
+        }
+        .btn-sheet-secondary {
+            background: rgba(255,255,255,0.08);
+            color: var(--text);
+            border: 1px solid rgba(255,255,255,0.12);
+        }
+        .btn-sheet-warn {
+            background: rgba(245, 158, 11, 0.25);
+            color: #fde68a;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+        }
+        .btn-sheet-danger {
+            background: rgba(239, 68, 68, 0.22);
+            color: #fecaca;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+        .chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 10px 0;
+        }
+        .chip {
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(0,0,0,0.2);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .chip.active {
+            background: rgba(79, 70, 229, 0.45);
+            border-color: rgba(129, 140, 248, 0.6);
+        }
+        .acc-item {
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 14px;
+            margin-bottom: 10px;
+            overflow: hidden;
+            background: rgba(0,0,0,0.18);
+        }
+        .acc-head {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 12px 14px;
+            border: none;
+            background: transparent;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-align: left;
+        }
+        .acc-meta {
+            font-size: 0.72rem;
+            font-weight: 600;
+            opacity: 0.75;
+        }
+        .acc-chev {
+            font-size: 0.75rem;
+            opacity: 0.6;
+            transition: transform 0.2s;
+        }
+        .acc-item.open .acc-chev { transform: rotate(180deg); }
+        .acc-body {
+            padding: 4px 10px 12px;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .acc-item.open .acc-body { display: flex; }
+        .dest-btn {
+            width: 100%;
+            text-align: left;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.05);
+            color: var(--text);
+            font-family: inherit;
+            font-size: 0.88rem;
+            cursor: pointer;
+        }
+        .dest-btn.selected {
+            border-color: rgba(129, 140, 248, 0.7);
+            background: rgba(79, 70, 229, 0.25);
+        }
+        .dest-btn small {
+            display: block;
+            opacity: 0.65;
+            font-size: 0.72rem;
+            margin-top: 4px;
+        }
+        .manual-transfer details {
+            margin-top: 16px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 14px;
+            padding: 10px 12px;
+            background: rgba(255,255,255,0.03);
+        }
+        .manual-transfer summary {
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.88rem;
+        }
+
+        #mobile-toast {
+            position: fixed;
+            bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+            left: 50%;
+            transform: translateX(-50%);
+            max-width: min(92vw, 420px);
+            padding: 12px 18px;
+            border-radius: 14px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            z-index: 4000;
+            display: none;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+            text-align: center;
+            line-height: 1.35;
+        }
+        #mobile-toast.ok {
+            background: rgba(16, 185, 129, 0.96);
+            color: #022c22;
+        }
+        #mobile-toast.err {
+            background: rgba(239, 68, 68, 0.96);
+            color: #fff;
+        }
+        .sheet-wol-hint {
+            font-size: 0.7rem;
+            opacity: 0.55;
+            margin-top: 8px;
+            line-height: 1.35;
+        }
+    </style>
+</head>
+<body>
+    <button id="alarm-silencer" onclick="silenceAlarm()">SILENCIAR ALARME</button>
+
+    <header>
+        <div class="brand-wrap">
+            <img id="brand-logo" class="brand-logo" alt="Logo">
+            <h1 id="brand-title">LHG Monitor</h1>
+        </div>
+        <div id="connection-status" class="status-badge status-offline">Desconectado</div>
+    </header>
+
+    <div id="device-list" class="device-list-root">
+        <div class="empty-state">
+            <p>Buscando aparelhos...</p>
+        </div>
+    </div>
+    <p class="tap-hint">Toque no título de cada modelo para minimizar ou expandir a lista. Toque no aparelho para liberar, retomar ou transferir.</p>
+
+    <div id="device-sheet" class="sheet-backdrop" style="display:none" aria-hidden="true">
+        <div class="sheet" role="dialog" aria-modal="true">
+            <div class="sheet-header">
+                <div>
+                    <div id="sheet-title" class="sheet-title">Aparelho</div>
+                    <div id="sheet-sub" class="sheet-sub"></div>
+                </div>
+                <button type="button" class="sheet-close" id="sheet-close" aria-label="Fechar">×</button>
+            </div>
+            <div id="sheet-body" class="sheet-body"></div>
+        </div>
+    </div>
+
+    <div class="manual-transfer transfer-card">
+        <details>
+            <summary>Transferência manual (origem/destino)</summary>
+            <div class="transfer-grid" style="margin-top:12px">
+            <select id="transfer-from" class="transfer-control">
+                <option value="">Origem (em uso)...</option>
+            </select>
+            <select id="transfer-to" class="transfer-control">
+                <option value="">Destino (disponível)...</option>
+            </select>
+            <p class="transfer-hint-full" style="font-size:0.78rem;opacity:0.8;margin:8px 0">
+                Transfere o tempo restante exato da origem (segundos incluídos). A origem fica livre.
+            </p>
+            <button type="button" onclick="sendTransfer()" class="btn-transfer-send">
+                Transferir
+            </button>
+            <div id="transfer-status" class="transfer-status"></div>
+            </div>
+        </details>
+    </div>
+
+    <button id="btn-request-notif" class="btn-request" onclick="requestPermission()">Ativar Notificações</button>
+
+    <audio id="alarm-sound" preload="auto">
+        <source src="https://assets.mixkit.co/active_storage/sfx/995/995-preview.mp3" type="audio/mpeg">
+    </audio>
+
+    <script>
+        let socket;
+        let devices = [];
+        /** Epoch da última session_sync — usado para contagem regressiva sem mutar timeRemaining (evita drift vs servidor). */
+        let mobileDevicesSyncAt = 0;
+        let mobileMeta = { systemName: 'LHG SYSTEM', logo: null };
+        let alarmActive = false;
+        let notifiedDevices = new Set();
+        const alarmSound = document.getElementById('alarm-sound');
+        const silencerBtn = document.getElementById('alarm-silencer');
+
+        const CATEGORY_ORDER = ['pc', 'playstation', 'console', 'arcade'];
+        const CATEGORY_LABEL = {
+            pc: 'PCs',
+            playstation: 'PlayStation',
+            console: 'Consoles',
+            arcade: 'Fliperama',
+            other: 'Outros'
+        };
+
+        let sheetDeviceId = null;
+        let sheetStep = 'main';
+        let sheetReleaseMins = 0;
+        let sheetTransferToId = '';
+        let sheetExpandedCats = {};
+        /** Recolher grupos na lista principal: chave = categoria; `false` = minimizado (default: expandido). */
+        let mainListSectionOpen = {};
+
+        function loadMainListSectionState() {
+            try {
+                const raw = sessionStorage.getItem('lhg-pwa-main-sections');
+                if (raw) mainListSectionOpen = JSON.parse(raw) || {};
+            } catch (e) {}
+        }
+        loadMainListSectionState();
+
+        function isMainListSectionExpanded(cat) {
+            return mainListSectionOpen[cat] !== false;
+        }
+
+        function toggleMainListSection(cat) {
+            mainListSectionOpen[cat] = !isMainListSectionExpanded(cat);
+            try {
+                sessionStorage.setItem('lhg-pwa-main-sections', JSON.stringify(mainListSectionOpen));
+            } catch (e) {}
+        }
+
+        function formatTime(seconds) {
+            if (seconds <= 0) return "00:00";
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function formatMinutesBrJs(totalMinutes) {
+            const m = Math.max(0, Math.floor(Number(totalMinutes) || 0));
+            if (m === 0) return '0min';
+            const h = Math.floor(m / 60);
+            const r = m % 60;
+            if (h === 0) return r + 'min';
+            if (r === 0) return h + 'h';
+            return h + 'h ' + r + 'min';
+        }
+
+        function getDevice(id) {
+            return devices.find(d => d.id === id);
+        }
+
+        /** Tempo restante coerente com o servidor (snapshot + relógio local). Não altera `d.timeRemaining`. */
+        function liveRemaining(d) {
+            if (!d) return 0;
+            if (d.status === 'paused') return Math.max(0, d.timeRemaining || 0);
+            if (d.status !== 'in_use') return 0;
+            if (!mobileDevicesSyncAt) return Math.max(0, d.timeRemaining || 0);
+            const elapsedSec = Math.floor((Date.now() - mobileDevicesSyncAt) / 1000);
+            return Math.max(0, (d.timeRemaining || 0) - elapsedSec);
+        }
+
+        function deviceTypeKey(type) {
+            const t = (type || '').toString();
+            return CATEGORY_ORDER.includes(t) ? t : 'other';
+        }
+
+        function closeSheet() {
+            const el = document.getElementById('device-sheet');
+            el.style.display = 'none';
+            el.setAttribute('aria-hidden', 'true');
+            sheetDeviceId = null;
+            sheetStep = 'main';
+        }
+
+        function openDeviceSheet(id) {
+            sheetDeviceId = id;
+            sheetStep = 'main';
+            sheetReleaseMins = 0;
+            sheetTransferToId = '';
+            sheetExpandedCats = {};
+            const d = getDevice(id);
+            const el = document.getElementById('device-sheet');
+            document.getElementById('sheet-title').textContent = d ? d.name : 'Aparelho';
+            document.getElementById('sheet-sub').textContent = d
+                ? `${d.connected === false ? 'Offline' : 'Online'} · ${(d.type || '').toUpperCase()}`
+                : '';
+            renderSheetBody();
+            el.style.display = 'flex';
+            el.setAttribute('aria-hidden', 'false');
+        }
+
+        function renderSheetBody() {
+            const body = document.getElementById('sheet-body');
+            const d = getDevice(sheetDeviceId);
+            if (!d) {
+                body.innerHTML = '<p style="opacity:0.8">Aparelho nao encontrado.</p>';
+                return;
+            }
+            const isInUse = d.status === 'in_use' && d.totalDuration > 0;
+            const isPaused = d.status === 'paused';
+            const isAvail = d.status === 'available';
+            const isMaint = d.status === 'maintenance';
+
+            if (sheetStep === 'transfer' && isInUse) {
+                const destGroups = {};
+                CATEGORY_ORDER.concat(['other']).forEach(k => { destGroups[k] = []; });
+                devices.forEach(dev => {
+                    if (dev.id === d.id) return;
+                    if (dev.status !== 'available') return;
+                    const k = deviceTypeKey(dev.type);
+                    destGroups[k].push(dev);
+                });
+
+                let accHtml = '';
+                CATEGORY_ORDER.concat(['other']).forEach(cat => {
+                    const list = destGroups[cat];
+                    if (!list.length) return;
+                    const open = sheetExpandedCats[cat] ? 'open' : '';
+                    const label = CATEGORY_LABEL[cat] || cat;
+                    const btns = list.map(dev => {
+                        const net = dev.connected === false ? 'offline' : 'online';
+                        const sel = sheetTransferToId === dev.id ? ' selected' : '';
+                        return `<button type="button" class="dest-btn${sel}" data-pick-dest="${dev.id}">
+                            ${dev.name}
+                            <small>${net} · disponivel</small>
+                        </button>`;
+                    }).join('');
+                    accHtml += `
+                        <div class="acc-item ${open}" data-cat="${cat}">
+                            <button type="button" class="acc-head" data-acc-toggle="${cat}">
+                                <span>${label}</span>
+                                <span class="acc-meta">${list.length} livre(ns)</span>
+                                <span class="acc-chev">v</span>
+                            </button>
+                            <div class="acc-body">${btns}</div>
+                        </div>`;
+                });
+
+                if (!accHtml) {
+                    accHtml = '<p style="opacity:0.8">Nenhum aparelho disponivel para receber tempo.</p>';
+                }
+
+                body.innerHTML = `
+                    <button type="button" class="btn-sheet btn-sheet-secondary" data-sheet-back>Voltar</button>
+                    <p style="opacity:0.85;font-size:0.88rem;margin:10px 0;">
+                        Tempo a transferir: <strong>${formatTime(liveRemaining(d))}</strong> (inteiro, conforme o servidor)
+                    </p>
+                    <p style="font-size:0.75rem;opacity:0.65;margin:8px 0 12px">Destino por categoria — toque na categoria para expandir.</p>
+                    ${accHtml}
+                    <button type="button" class="btn-sheet btn-sheet-primary" style="margin-top:14px" data-sheet-do-transfer>Transferir agora</button>
+                    <p id="sheet-transfer-hint" style="font-size:12px;opacity:0.75;margin-top:8px;min-height:16px"></p>
+                `;
+                bindSheetTransferInputs();
+                return;
+            }
+
+            let actions = '';
+            if (isMaint) {
+                actions = '<p style="opacity:0.85">Aparelho em manutenção. Ajuste no PC servidor.</p>';
+            } else if (isAvail) {
+                actions = `
+                    <p style="font-size:0.88rem;opacity:0.9;margin-bottom:6px">Liberar para uso</p>
+                    <p style="font-size:0.8rem;opacity:0.75;margin-bottom:10px">Total: <strong>${formatMinutesBrJs(sheetReleaseMins)}</strong> — toque para somar (máx. 24 h).</p>
+                    <div class="chip-row">
+                        <button type="button" class="chip" data-release-add="10">+10 min</button>
+                        <button type="button" class="chip" data-release-add="30">+30 min</button>
+                        <button type="button" class="chip" data-release-add="60">+1 h</button>
+                        <button type="button" class="chip" data-release-add="120">+2 h</button>
+                    </div>
+                    <button type="button" class="btn-sheet btn-sheet-secondary" style="margin-top:8px" data-release-zero>Zerar tempo</button>
+                    <label style="font-size:0.78rem;opacity:0.8;margin-top:12px;display:block">Ou defina o total (minutos)</label>
+                    <input type="number" id="sheet-release-custom" class="transfer-control" style="margin-top:6px" min="0" max="1440" value="${sheetReleaseMins || ''}" placeholder="0" />
+                    <button type="button" class="btn-sheet btn-sheet-primary" style="margin-top:12px" data-sheet-release>Liberar agora</button>
+                    <p style="font-size:0.72rem;opacity:0.55;margin-top:10px">Sessão como convidado (Celular); cadastro de clientes só no PC servidor.</p>
+                    <p style="font-size:0.72rem;opacity:0.6;margin-top:6px">PCs conectados: tela liberada automaticamente.</p>
+                `;
+            } else if (isPaused) {
+                const pcEndShut = (d.type === 'pc')
+                    ? `<button type="button" class="btn-sheet btn-sheet-danger" style="margin-top:10px" data-sheet-end-session>Finalizar sessao</button>
+                       <button type="button" class="btn-sheet btn-sheet-danger" style="margin-top:8px" data-sheet-shutdown-pc>Desligar computador</button>
+                       <p style="font-size:0.68rem;opacity:0.55;margin-top:8px">PC: finalizar bloqueia a tela no cliente; desligar agenda o Windows (~20 s).</p>`
+                    : `<button type="button" class="btn-sheet btn-sheet-danger" style="margin-top:10px" data-sheet-end-session>Finalizar sessao</button>`;
+                actions = `
+                    <button type="button" class="btn-sheet btn-sheet-primary" data-sheet-resume>Retomar sessao</button>
+                    ${pcEndShut}
+                    <p style="font-size:0.75rem;opacity:0.65;margin-top:10px">Retoma o tempo pausado neste aparelho.</p>
+                `;
+            } else if (isInUse) {
+                const pcEndShut = (d.type === 'pc')
+                    ? `<button type="button" class="btn-sheet btn-sheet-danger" style="margin-top:10px" data-sheet-end-session>Finalizar sessao</button>
+                       <button type="button" class="btn-sheet btn-sheet-danger" style="margin-top:8px" data-sheet-shutdown-pc>Desligar computador</button>
+                       <p style="font-size:0.68rem;opacity:0.55;margin-top:8px">PC conectado: finalizar encerra a sessao e bloqueia a tela no cliente.</p>`
+                    : `<button type="button" class="btn-sheet btn-sheet-danger" style="margin-top:10px" data-sheet-end-session>Finalizar sessao</button>`;
+                actions = `
+                    <button type="button" class="btn-sheet btn-sheet-warn" data-sheet-go-transfer>Transferir tempo</button>
+                    ${pcEndShut}
+                    <p style="font-size:0.75rem;opacity:0.65;margin-top:10px">Escolha outro aparelho disponivel, por categoria.</p>
+                `;
+            } else {
+                actions = '<p style="opacity:0.85">Estado nao suportado para acoes rapidas.</p>';
+            }
+
+            body.innerHTML = `<div class="sheet-actions">${actions}</div>`;
+            bindSheetMainInputs();
+        }
+
+        function bindSheetMainInputs() {
+            const body = document.getElementById('sheet-body');
+            body.querySelectorAll('[data-release-add]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const add = Number(btn.getAttribute('data-release-add'));
+                    if (Number.isFinite(add) && add > 0) {
+                        sheetReleaseMins = Math.min(1440, sheetReleaseMins + add);
+                        renderSheetBody();
+                    }
+                });
+            });
+            const zero = body.querySelector('[data-release-zero]');
+            if (zero) {
+                zero.addEventListener('click', () => {
+                    sheetReleaseMins = 0;
+                    renderSheetBody();
+                });
+            }
+            const cust = document.getElementById('sheet-release-custom');
+            if (cust) {
+                cust.addEventListener('change', () => {
+                    const v = Number(cust.value);
+                    if (Number.isFinite(v) && v >= 0) sheetReleaseMins = Math.min(1440, Math.floor(v));
+                    renderSheetBody();
+                });
+            }
+            const rel = body.querySelector('[data-sheet-release]');
+            if (rel) rel.addEventListener('click', confirmSheetRelease);
+            const res = body.querySelector('[data-sheet-resume]');
+            if (res) res.addEventListener('click', confirmSheetResume);
+            const gt = body.querySelector('[data-sheet-go-transfer]');
+            if (gt) gt.addEventListener('click', () => {
+                sheetStep = 'transfer';
+                renderSheetBody();
+            });
+            const endS = body.querySelector('[data-sheet-end-session]');
+            if (endS) endS.addEventListener('click', confirmSheetEndSession);
+            const shut = body.querySelector('[data-sheet-shutdown-pc]');
+            if (shut) shut.addEventListener('click', confirmSheetShutdownPc);
+        }
+
+        function confirmSheetEndSession() {
+            if (!confirm('Finalizar a sessao neste aparelho? O tempo restante volta para o cliente (se cadastrado).')) return;
+            if (!socket || socket.readyState !== 1) {
+                alert('Sem conexao com o servidor.');
+                return;
+            }
+            socket.send(JSON.stringify({ type: 'mobile_end_session', deviceId: sheetDeviceId }));
+            closeSheet();
+        }
+
+        function confirmSheetShutdownPc() {
+            if (!confirm('Desligar este PC em cerca de 20 segundos? Salve arquivos abertos. (Windows)')) return;
+            if (!socket || socket.readyState !== 1) {
+                alert('Sem conexao com o servidor.');
+                return;
+            }
+            socket.send(JSON.stringify({ type: 'mobile_shutdown_pc', deviceId: sheetDeviceId }));
+            closeSheet();
+        }
+
+        function bindSheetTransferInputs() {
+            const body = document.getElementById('sheet-body');
+            body.querySelectorAll('[data-acc-toggle]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const cat = btn.getAttribute('data-acc-toggle');
+                    sheetExpandedCats[cat] = !sheetExpandedCats[cat];
+                    const item = body.querySelector('.acc-item[data-cat="' + cat + '"]');
+                    if (item) item.classList.toggle('open', sheetExpandedCats[cat]);
+                });
+            });
+            body.querySelectorAll('[data-pick-dest]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    sheetTransferToId = btn.getAttribute('data-pick-dest');
+                    body.querySelectorAll('[data-pick-dest]').forEach(b => b.classList.remove('selected'));
+                    btn.classList.add('selected');
+                });
+            });
+            const back = body.querySelector('[data-sheet-back]');
+            if (back) back.addEventListener('click', () => {
+                sheetStep = 'main';
+                renderSheetBody();
+            });
+            const go = body.querySelector('[data-sheet-do-transfer]');
+            if (go) go.addEventListener('click', confirmSheetTransfer);
+        }
+
+        function confirmSheetRelease() {
+            const cust = document.getElementById('sheet-release-custom');
+            if (cust) {
+                const v = Number(cust.value);
+                if (Number.isFinite(v) && v >= 0) sheetReleaseMins = Math.min(1440, Math.floor(v));
+            }
+            if (sheetReleaseMins < 5) {
+                alert('Defina pelo menos 5 minutos (some com os botoes ou digite o total).');
+                return;
+            }
+            if (!socket || socket.readyState !== 1) {
+                alert('Sem conexao com o servidor.');
+                return;
+            }
+            socket.send(JSON.stringify({
+                type: 'mobile_release_device',
+                deviceId: sheetDeviceId,
+                durationMinutes: sheetReleaseMins
+            }));
+            closeSheet();
+        }
+
+        function confirmSheetResume() {
+            if (!socket || socket.readyState !== 1) {
+                alert('Sem conexao com o servidor.');
+                return;
+            }
+            socket.send(JSON.stringify({
+                type: 'mobile_resume_session',
+                deviceId: sheetDeviceId
+            }));
+            closeSheet();
+        }
+
+        function confirmSheetTransfer() {
+            const hint = document.getElementById('sheet-transfer-hint');
+            const from = sheetDeviceId;
+            const to = sheetTransferToId;
+            if (!socket || socket.readyState !== 1) {
+                if (hint) hint.textContent = 'Sem conexao com o servidor.';
+                return;
+            }
+            if (!from || !to) {
+                if (hint) hint.textContent = 'Selecione o aparelho de destino.';
+                return;
+            }
+            if (from === to) {
+                if (hint) hint.textContent = 'Origem e destino nao podem ser iguais.';
+                return;
+            }
+            socket.send(JSON.stringify({
+                type: 'mobile_transfer_time',
+                fromDeviceId: from,
+                toDeviceId: to
+            }));
+            if (hint) hint.textContent = 'Comando enviado. Aguarde…';
+            setTimeout(closeSheet, 600);
+        }
+
+        function renderDeviceCardHtml(d) {
+            const rem = liveRemaining(d);
+            const isInUse = d.status === 'in_use' && d.totalDuration > 0;
+            const isWarning = isInUse && rem > 0 && rem < 300;
+            const isDanger = isInUse && rem <= 0;
+            const progress = isInUse && d.totalDuration > 0 ? Math.min(100, (rem / d.totalDuration) * 100) : 0;
+
+            if (isDanger && !notifiedDevices.has(d.id)) {
+                triggerAlert(d);
+                notifiedDevices.add(d.id);
+            }
+
+            const netBadge = (d.connected === false)
+                ? '<span class="badge badge-offline">OFFLINE</span>'
+                : '<span class="badge badge-online">ONLINE</span>';
+
+            const statusBadge = d.status === 'available'
+                ? '<span class="badge badge-available">DISPONÍVEL</span>'
+                : d.status === 'in_use'
+                    ? '<span class="badge badge-inuse">EM USO</span>'
+                    : d.status === 'paused'
+                        ? '<span class="badge badge-paused">PAUSADO</span>'
+                        : '<span class="badge badge-maint">MANUT.</span>';
+
+            const rightBox = isInUse ? `
+                <div class="time-box">
+                    <div class="time-remaining" style="color: ${isDanger ? '#ef4444' : (isWarning ? '#f59e0b' : '#f8fafc')}">
+                        ${formatTime(rem)}
+                    </div>
+                    <div class="time-label">Restante</div>
+                </div>
+            ` : `
+                <div class="time-box" style="opacity: 0.8;">
+                    <div class="time-remaining" style="font-size: 1.1rem;">—</div>
+                    <div class="time-label">Tempo</div>
+                </div>
+            `;
+
+            const infoRow = isInUse ? `
+                <div class="device-info">
+                    <span>Sessão de ${Math.round(d.totalDuration / 60)} min</span>
+                    <span>Cliente: ${d.customer || 'Convidado'}</span>
+                </div>
+            ` : `
+                <div class="device-info">
+                    <span>${(d.type || '').toString().toUpperCase()}</span>
+                    <span>Toque para acoes</span>
+                </div>
+            `;
+
+            const progressRow = isInUse ? `
+                <div class="progress-container">
+                    <div class="progress-bar" style="width: ${progress}%"></div>
+                </div>
+            ` : '';
+
+            return `
+                <div class="device-card touch-card ${isDanger ? 'alert' : ''}" tabindex="0" role="button" data-device-id="${d.id}">
+                    <div class="device-header">
+                        <div>
+                            <div class="device-name">${d.name}</div>
+                            <div class="device-badges">
+                                ${netBadge}
+                                ${statusBadge}
+                            </div>
+                        </div>
+                        ${rightBox}
+                    </div>
+                    ${progressRow}
+                    ${infoRow}
+                </div>
+            `;
+        }
+
+        function updateUI() {
+            const list = document.getElementById('device-list');
+            if (!devices || devices.length === 0) {
+                list.innerHTML = '<div class="empty-state"><p>Nenhum aparelho cadastrado.</p></div>';
+            } else {
+                const groups = {};
+                CATEGORY_ORDER.concat(['other']).forEach((k) => { groups[k] = []; });
+                devices.forEach((d) => {
+                    const k = deviceTypeKey(d.type);
+                    groups[k].push(d);
+                });
+
+                const parts = [];
+                CATEGORY_ORDER.concat(['other']).forEach((cat) => {
+                    const groupList = groups[cat];
+                    if (!groupList.length) return;
+                    const label = CATEGORY_LABEL[cat] || cat;
+                    const expanded = isMainListSectionExpanded(cat);
+                    const n = groupList.length;
+                    const cards = groupList.map(renderDeviceCardHtml).join('');
+                    parts.push(`
+                        <section class="list-section ${expanded ? '' : 'collapsed'}" data-main-cat="${cat}">
+                            <button type="button" class="list-section-head" data-main-toggle="${cat}" aria-expanded="${expanded}">
+                                <span class="list-section-head-main">
+                                    <span class="list-section-title">${label}</span>
+                                    <span class="list-section-meta">${n} aparelho${n === 1 ? '' : 's'}</span>
+                                </span>
+                                <span class="list-section-chev">▼</span>
+                            </button>
+                            <div class="list-section-body">
+                                ${cards}
+                            </div>
+                        </section>
+                    `);
+                });
+                list.innerHTML = parts.join('') || '<div class="empty-state"><p>Nenhum aparelho cadastrado.</p></div>';
+            }
+
+            // Popular selects de transferência
+            const fromSel = document.getElementById('transfer-from');
+            const toSel = document.getElementById('transfer-to');
+            if (fromSel && toSel) {
+              const fromOptions = devices.filter(d => d.status === 'in_use' && d.totalDuration > 0)
+                .map(d => `<option value="${d.id}">${d.name} (${formatTime(liveRemaining(d))})</option>`)
+                .join('');
+              const toOptions = devices
+                .filter(d => d.status === 'available')
+                .map(d => {
+                    const networkState = d.connected === false ? 'offline' : 'online';
+                    return `<option value="${d.id}">${d.name} (${networkState} • disponível)</option>`;
+                })
+                .join('');
+              fromSel.innerHTML = `<option value="">Origem (em uso)...</option>${fromOptions}`;
+              toSel.innerHTML = `<option value="">Destino (disponível)...</option>${toOptions}`;
+            }
+
+            if (sheetDeviceId) {
+                const still = getDevice(sheetDeviceId);
+                const st = document.getElementById('sheet-title');
+                if (st) st.textContent = still ? still.name : 'Aparelho';
+            }
+
+            const logoEl = document.getElementById('brand-logo');
+            const titleEl = document.getElementById('brand-title');
+            if (titleEl) {
+                titleEl.textContent = `${mobileMeta.systemName || 'LHG SYSTEM'} Monitor`;
+            }
+            if (logoEl) {
+                if (mobileMeta.logo) {
+                    logoEl.src = mobileMeta.logo;
+                    logoEl.style.display = 'block';
+                } else {
+                    logoEl.removeAttribute('src');
+                    logoEl.style.display = 'none';
+                }
+            }
+        }
+
+        /** Fala o aviso com o nome do aparelho (ex.: "Atenção! PS5 A. Acabou o tempo."). */
+        function speakTimeUpAlert(device) {
+            if (!('speechSynthesis' in window)) return false;
+            try {
+                const name = String(device && device.name ? device.name : 'Aparelho').trim() || 'Aparelho';
+                const text = `Atenção! ${name}. Acabou o tempo.`;
+                window.speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance(text);
+                u.lang = 'pt-BR';
+                u.rate = 0.88;
+                u.pitch = 1;
+                const voices = window.speechSynthesis.getVoices();
+                const pt =
+                    voices.find((v) => v.lang && /^pt[-_]/i.test(v.lang)) ||
+                    voices.find((v) => v.lang && /pt/i.test(v.lang)) ||
+                    voices.find((v) => v.lang && /br/i.test(v.lang));
+                if (pt) u.voice = pt;
+                window.speechSynthesis.speak(u);
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function triggerAlert(device) {
+            if (!alarmActive) {
+                alarmActive = true;
+                silencerBtn.style.display = 'block';
+
+                const spoke = speakTimeUpAlert(device);
+                if (!spoke) {
+                    alarmSound.loop = true;
+                    alarmSound.volume = 1;
+                    alarmSound.play().catch(() => console.log('Auto-play bloqueado'));
+                }
+
+                if ('vibrate' in navigator) {
+                    navigator.vibrate([500, 200, 500, 200, 500]);
+                }
+
+                if (Notification.permission === 'granted') {
+                    navigator.serviceWorker.ready.then((reg) => {
+                        reg.showNotification('TEMPO ACABOU!', {
+                            body: `${device.name}: Acabou o tempo.`,
+                            icon: '/pwa-icon.png',
+                            vibrate: [500, 200, 500],
+                            tag: 'time-alert-' + device.id,
+                            requireInteraction: true
+                        });
+                    });
+                }
+            }
+        }
+
+        function silenceAlarm() {
+            alarmActive = false;
+            if ('speechSynthesis' in window) {
+                try {
+                    window.speechSynthesis.cancel();
+                } catch (e) {}
+            }
+            alarmSound.pause();
+            alarmSound.currentTime = 0;
+            alarmSound.loop = false;
+            silencerBtn.style.display = 'none';
+        }
+
+        function connect() {
+            const host = window.location.hostname;
+            const port = 8080; // Reusando a porta do servidor de rede para dados
+            
+            socket = new WebSocket(`ws://${host}:${port}`);
+
+            socket.onopen = () => {
+                document.getElementById('connection-status').className = 'status-badge status-online';
+                document.getElementById('connection-status').innerText = 'Online';
+                mobileDevicesSyncAt = Date.now();
+                socket.send(JSON.stringify({ type: 'mobile_sync' }));
+            };
+
+            socket.onclose = () => {
+                document.getElementById('connection-status').className = 'status-badge status-offline';
+                document.getElementById('connection-status').innerText = 'Reconectando...';
+                setTimeout(connect, 3000);
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'session_sync') {
+                    devices = data.devices;
+                    mobileDevicesSyncAt = Date.now();
+                    mobileMeta.systemName = data.systemName || 'LHG SYSTEM';
+                    mobileMeta.logo = data.logo || null;
+                    updateUI();
+                }
+            };
+        }
+
+        function sendTransfer() {
+            const status = document.getElementById('transfer-status');
+            const from = document.getElementById('transfer-from').value;
+            const to = document.getElementById('transfer-to').value;
+
+            if (!socket || socket.readyState !== 1) {
+                status.textContent = 'Sem conexão com o servidor.';
+                return;
+            }
+            if (!from || !to) {
+                status.textContent = 'Selecione origem e destino.';
+                return;
+            }
+            if (from === to) {
+                status.textContent = 'A origem e o destino precisam ser diferentes.';
+                return;
+            }
+
+            socket.send(JSON.stringify({
+                type: 'mobile_transfer_time',
+                fromDeviceId: from,
+                toDeviceId: to
+            }));
+            status.textContent = 'Comando enviado. Aguarde atualizar...';
+            setTimeout(() => { status.textContent = ''; }, 2500);
+        }
+
+        function requestPermission() {
+            Notification.requestPermission().then(permission => {
+                if (permission === 'granted') {
+                    document.getElementById('btn-request-notif').style.display = 'none';
+                }
+            });
+        }
+
+        // iPhone em http://IP:4000 não tem contexto seguro — Safari não registra SW (só HTTPS ou localhost).
+        // Sem .catch() o Safari pode registrar falha silenciosa; a página deve funcionar igual sem SW.
+        if ('serviceWorker' in navigator) {
+            if (window.isSecureContext) {
+                navigator.serviceWorker.register('./sw.js', { scope: './' }).then(function () {
+                    console.log('SW ok');
+                }).catch(function (e) {
+                    console.warn('SW:', e && e.message);
+                });
+            } else {
+                console.info('LHG mobile: sem HTTPS, notificações push no iPhone ficam limitadas. Use o site normalmente.');
+            }
+        }
+
+        // Check permission initial
+        if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+            document.getElementById('btn-request-notif').style.display = 'block';
+        }
+
+        // Atualiza só a UI: o restante vem de liveRemaining() (snapshot + relógio), sem corromper o pacote do servidor.
+        setInterval(() => updateUI(), 1000);
+
+        document.getElementById('device-list').addEventListener('click', (e) => {
+            const head = e.target.closest('[data-main-toggle]');
+            if (head) {
+                e.preventDefault();
+                toggleMainListSection(head.getAttribute('data-main-toggle'));
+                updateUI();
+                return;
+            }
+            const card = e.target.closest('[data-device-id]');
+            if (!card) return;
+            openDeviceSheet(card.getAttribute('data-device-id'));
+        });
+        document.getElementById('device-list').addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const head = e.target.closest('[data-main-toggle]');
+            if (head) {
+                e.preventDefault();
+                toggleMainListSection(head.getAttribute('data-main-toggle'));
+                updateUI();
+                return;
+            }
+            const card = e.target.closest('[data-device-id]');
+            if (!card) return;
+            e.preventDefault();
+            openDeviceSheet(card.getAttribute('data-device-id'));
+        });
+        document.getElementById('sheet-close').addEventListener('click', closeSheet);
+        document.getElementById('device-sheet').addEventListener('click', (e) => {
+            if (e.target.id === 'device-sheet') closeSheet();
+        });
+
+        connect();
+    </script>
+</body>
+</html>

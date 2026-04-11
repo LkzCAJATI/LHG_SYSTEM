@@ -5,6 +5,7 @@ export interface User {
   password: string;
   role: 'admin' | 'employee';
   prefix: string; // Ex: 'L' para Lucas, 'S' para Sergio
+  lastOSNumber?: number;
   createdAt: Date;
 }
 
@@ -17,7 +18,8 @@ export interface Device {
   pricePerHour: number;
   consoleType?: 'playstation' | 'xbox' | 'switch' | 'other';
   extraControllers?: number;
-  // Controle remoto para PCs
+  // Controle remoto para PCs — deve coincidir com o ID no cliente (ex.: pc-01) se diferente do id do cadastro
+  networkClientId?: string;
   ip?: string;
   mac?: string;
   isConnected?: boolean;
@@ -31,7 +33,7 @@ export interface Session {
   deviceName: string;
   customerId?: string;
   customerName?: string;
-  startTime: Date;
+  startTime?: Date;
   endTime?: Date;
   duration: number; // em minutos
   extraControllers: number;
@@ -40,6 +42,7 @@ export interface Session {
   isPaused?: boolean;
   pausedAt?: Date;
   totalPausedTime?: number; // In milliseconds
+  isPendingStart?: boolean;
 }
 
 export interface ServiceOrder {
@@ -56,12 +59,13 @@ export interface ServiceOrder {
   deviceBrandModel: string;
   serialNumber: string;
   physicalState: string; // riscos, trincos, acessórios
+  customerComplaint?: string; // relato do cliente sobre o problema
   
   // Serviços
   selectedServices: string[]; // ['diagnóstico', 'formatação', ...]
   otherService?: string;
   
-  status: 'open' | 'analyzing' | 'ready' | 'delivered' | 'canceled';
+  status: 'aberta' | 'em_diagnostico' | 'aguardando_aprovacao' | 'aprovado' | 'em_andamento' | 'aguardando_pagamento' | 'finalizado' | 'canceled';
   notes?: string;
   
   userId: string;
@@ -70,7 +74,143 @@ export interface ServiceOrder {
   deliveredAt?: Date;
   
   budgetId?: string; // Vínculo com orçamento se gerado
-  attachments?: string[]; // Caminhos dos arquivos anexados (PDF/Fotos)
+  attachments?: string[]; // Legado
+  diagnosis?: TechnicalDiagnosis;
+  contract?: ServiceContract;
+  paymentSummary?: OSPaymentSummary;
+  attachmentsByCategory?: OSAttachments;
+  history?: OsHistoryEvent[];
+  stockDeducted?: boolean;
+}
+
+export type StockDeductionPolicy = 'on_approval' | 'on_service_start';
+
+export interface TechnicalDiagnosis {
+  problemFound: string;
+  testsPerformed: string;
+  requiredParts: string;
+  technicianNotes: string;
+  createdAt: Date;
+  createdByUserId: string;
+  createdByUserName: string;
+}
+
+export interface ServiceContract {
+  id: string;
+  generatedAt: Date;
+  type: 'reparo' | 'venda';
+  objectDescription: string;
+  totalValue: number;
+  paymentTerms: string;
+  warrantyTerms: string;
+  defaultTerms: {
+    inadimplencia: string;
+    quitacao: string;
+    foro: string;
+  };
+}
+
+export interface PaymentInstallment {
+  id: string;
+  number: number;
+  total: number;
+  dueDate?: string;
+  status: 'pending' | 'paid' | 'overdue';
+  paidAt?: string;
+}
+
+export interface PaymentEntry {
+  id: string;
+  osId: string;
+  receiptId?: string;
+  type: 'entrada' | 'parcela' | 'quitacao' | 'avista';
+  method: 'pix' | 'dinheiro' | 'debito' | 'credito';
+  amount: number;
+  installmentNumber?: number;
+  installmentsTotal?: number;
+  paidAt: Date;
+  notes?: string;
+  userId: string;
+  userName: string;
+}
+
+export interface Receipt {
+  id: string;
+  receiptNumber: string;
+  osId: string;
+  type: 'entrada' | 'parcela' | 'quitacao' | 'avista';
+  customerName: string;
+  customerCPF?: string;
+  amount: number;
+  amountInWords: string;
+  description: string;
+  paymentMethod: 'pix' | 'dinheiro' | 'debito' | 'credito';
+  installmentLabel?: string;
+  issuedAt: Date;
+}
+
+export interface OSPaymentSummary {
+  total: number;
+  paid: number;
+  totalPaid: number;
+  pending: number;
+  installments: PaymentInstallment[];
+  entries: PaymentEntry[];
+  receipts: Receipt[];
+}
+
+export type OSAttachmentCategory =
+  | 'os_signed'
+  | 'budget_signed'
+  | 'contract_signed'
+  | 'receipt_signed'
+  | 'photo'
+  | 'video'
+  | 'other';
+
+export interface OSAttachmentItem {
+  id: string;
+  filename: string;
+  category: OSAttachmentCategory;
+  createdAt: Date;
+  label?: string;
+}
+
+export interface OSAttachmentRef {
+  id: string;
+  filename: string;
+  createdAt: Date;
+  label?: string;
+}
+
+export interface OSAttachments {
+  os?: OSAttachmentRef[];
+  diagnostico?: OSAttachmentRef[];
+  orcamento?: OSAttachmentRef[];
+  contrato?: OSAttachmentRef[];
+  pagamento?: OSAttachmentRef[];
+  photos?: OSAttachmentRef[];
+  videos?: OSAttachmentRef[];
+  others?: OSAttachmentRef[];
+}
+
+export interface OsHistoryEvent {
+  id: string;
+  type:
+    | 'created'
+    | 'status_changed'
+    | 'diagnosis_saved'
+    | 'budget_generated'
+    | 'budget_approved'
+    | 'contract_generated'
+    | 'payment_registered'
+    | 'receipt_generated'
+    | 'attachment_added'
+    | 'stock_deducted';
+  message: string;
+  createdAt: Date;
+  userId?: string;
+  userName?: string;
 }
 
 export interface Product {
@@ -102,6 +242,7 @@ export interface CartItem {
 
 export interface Sale {
   id: string;
+  source?: 'pdv' | 'budget';
   items: CartItem[];
   subtotal: number;
   discount: number;
@@ -162,6 +303,8 @@ export interface BudgetItem {
   imageUrl?: string;
   quantity: number;
   unitPrice: number;
+  discountType?: 'value' | 'percent'; // desconto por item
+  discountValue?: number; // R$ ou %
   totalPrice: number;
 }
 
@@ -169,6 +312,8 @@ export interface Budget {
   id: string;
   customerId?: string;
   customerName?: string;
+  customerCPF?: string;
+  customerPhone?: string;
   items: BudgetItem[];
   subtotal: number;
   discount: number;
@@ -178,6 +323,9 @@ export interface Budget {
   saleId?: string;
   osId?: string; // Vínculo com a OS de origem
   externalId?: string; // Ex: L-14
+  userId?: string;
+  userName?: string;
+  attachments?: string[]; // PDFs/Fotos anexados pelo cliente
   downPayment?: {
     amount: number;
     method: string;
@@ -223,6 +371,9 @@ export interface StockMovement {
   productId: string;
   productName: string;
   type: 'entry' | 'sale' | 'adjustment';
+  sourceType?: 'sale' | 'budget' | 'service_order';
+  sourceId?: string;
+  sourceExternalId?: string;
   quantity: number;
   previousStock: number;
   newStock: number;
@@ -236,6 +387,7 @@ export interface NetworkClient {
   deviceId?: string;
   deviceName?: string;
   ip: string;
+  mac?: string;
   connected: boolean;
   lastSeen: Date;
 }

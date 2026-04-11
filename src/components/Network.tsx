@@ -1,20 +1,22 @@
 import { useState, useEffect } from 'react';
 import { useNetworkStore } from '../store/networkStore';
 import { useStore } from '../store/useStore';
-import { Timer, Aperture, X, Maximize, Minimize, MousePointer2, Zap } from 'lucide-react';
+import { Timer, Aperture, Zap } from 'lucide-react';
 import RemoteDesktopViewer from './RemoteDesktopViewer';
+import { sessionRemainingSeconds } from '../utils/sessionRemaining';
 
 export default function Network() {
   const { 
     clients, serverIP, serverPort, setServerConfig, toggleClient, 
     shutdownClient, restartClient, scanNetwork, isScanning, 
     detectedIp, detectIp, startServer, stopServer, isServerRunning, initializeIpc,
-    removeClient
+    removeClient, wakeOnLan
   } = useNetworkStore();
   
   const { 
     devices, sessions, addTimeToSession
   } = useStore();
+  const sendDeviceCommand = useNetworkStore((s) => s.sendDeviceCommand);
   
   const [now, setNow] = useState(Date.now());
   const [editIP, setEditIP] = useState(serverIP);
@@ -100,6 +102,35 @@ export default function Network() {
           <span className="text-gray-400">PCs com o app na LAN</span>
           <p className="text-xl font-bold text-white mt-2">{clients.filter(c => c.connected).length}</p>
         </div>
+
+        <div className="bg-purple-900/20 backdrop-blur rounded-xl p-4 border border-purple-500/30 md:col-span-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-purple-400 font-semibold">📱 Monitor Mobile Ativado</span>
+                <span className="bg-purple-500/20 text-purple-400 text-[10px] px-1.5 py-0.5 rounded font-bold">PWA</span>
+              </div>
+              <p className="text-sm text-gray-400 mt-1">
+                Acesse do seu celular para ver o tempo e receber notificações com áudio:
+              </p>
+              <p className="text-lg font-mono font-bold text-white mt-2 flex items-center gap-2">
+                http://{detectedIp || '...'}:4000
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(`http://${detectedIp}:4000`);
+                    alert('URL Copiada!');
+                  }}
+                  className="p-1 hover:bg-white/10 rounded"
+                >
+                  📋
+                </button>
+              </p>
+            </div>
+            <div className="hidden sm:block text-right text-xs text-gray-500 max-w-[200px]">
+              Dica: Adicione à tela inicial do celular para receber alertas em segundo plano.
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Guia de Instalação */}
@@ -155,6 +186,7 @@ export default function Network() {
             <button
               onClick={() => scanNetwork()}
               disabled={isScanning}
+              title="Ping na sua sub-rede (IPv4). Firewall pode bloquear ICMP; no app Electron funciona no Windows."
               className={`flex-1 px-4 py-2 border rounded-lg transition-all font-medium ${
                 isScanning 
                   ? 'bg-purple-900/20 text-purple-400 border-purple-800 animate-pulse' 
@@ -199,18 +231,22 @@ export default function Network() {
                   </p>
                   
                   {(() => {
-                    // @ts-ignore
-                    const sources = async () => await window.lhgSystem?.getScreenSources();
                     const device = devices.find(d => d.id === client.id);
                     const session = sessions.find(s => s.id === device?.currentSession?.id);
-                    if (session && !client.locked) {
-                      // Calcular tempo restante: Duração total - Tempo decorrido
-                      const durationMs = session.duration * 60000;
-                      const elapsedMs = now - new Date(session.startTime).getTime() - (session.totalPausedTime || 0);
-                      const remainingMs = Math.max(0, durationMs - elapsedMs);
-                      
-                      const mins = Math.floor(remainingMs / 60000);
-                      const secs = Math.floor((remainingMs % 60000) / 1000);
+                    if (session && session.isPendingStart) {
+                      return (
+                        <p className="flex items-center gap-2 bg-blue-500/10 p-1.5 rounded border border-blue-500/20">
+                          <Zap size={14} className="text-blue-400 animate-pulse" />
+                          <span className="text-blue-400 font-medium text-xs">
+                            ⏳ Aguardando PC iniciar...
+                          </span>
+                        </p>
+                      );
+                    }
+                    if (session && !client.locked && session.startTime) {
+                      const remSec = sessionRemainingSeconds(session, now);
+                      const mins = Math.floor(remSec / 60);
+                      const secs = remSec % 60;
                       
                       return (
                         <p className="flex items-center gap-2 bg-yellow-500/10 p-1.5 rounded border border-yellow-500/20">
@@ -312,36 +348,61 @@ export default function Network() {
             🔴 PCs Desconectados ({disconnectedClients.length})
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {disconnectedClients.map((client) => (
-              <div
-                key={client.id}
-                className="bg-gray-700/30 rounded-lg p-4 border border-gray-600 opacity-60 group relative flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                      <span className="text-gray-300 font-medium">{client.name}</span>
-                    </div>
-                    <span className="text-xs text-gray-500">{client.ip}</span>
-                  </div>
-                  <p className="text-sm text-gray-500">
-                    Última conexão: {client.lastSeen ? new Date(client.lastSeen).toLocaleString() : 'Nunca'}
-                  </p>
-                </div>
-                
-                <button
-                  onClick={() => {
-                    if (confirm(`Remover permanentemente o PC "${client.name}" da lista?`)) {
-                      removeClient(client.id);
-                    }
-                  }}
-                  className="mt-3 text-xs text-red-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-300 flex items-center gap-1"
+            {disconnectedClients.map((client) => {
+              // Verificar se o dispositivo correspondente no store tem MAC cadastrado
+              const linkedDevice = devices.find(d => d.id === client.id || d.ip === client.ip);
+              const hasMac = !!(linkedDevice?.mac || (client as any).mac);
+              const clientMac = linkedDevice?.mac || (client as any).mac;
+
+              return (
+                <div
+                  key={client.id}
+                  className="bg-gray-700/30 rounded-lg p-4 border border-gray-600 opacity-70 group relative flex flex-col justify-between hover:opacity-100 transition-opacity"
                 >
-                  🗑️ Remover da Rede
-                </button>
-              </div>
-            ))}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                        <span className="text-gray-300 font-medium">{client.name}</span>
+                      </div>
+                      <span className="text-xs text-gray-500">{client.ip}</span>
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      Última conexão: {client.lastSeen ? new Date(client.lastSeen).toLocaleString() : 'Nunca'}
+                    </p>
+                    {hasMac && (
+                      <p className="text-xs text-gray-600 font-mono mt-1">MAC: {clientMac}</p>
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex items-center gap-2">
+                    {hasMac && (
+                      <button
+                        onClick={async () => {
+                          await wakeOnLan(clientMac);
+                          alert(`✅ Pacote Wake on LAN enviado para ${client.name}!\nO PC deve ligar em alguns segundos.`);
+                        }}
+                        className="flex-1 px-3 py-1.5 bg-green-600/80 hover:bg-green-500 text-white rounded text-xs font-medium transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-green-900/20"
+                        title="Ligar PC remotamente via Wake on LAN"
+                      >
+                        <Zap size={12} />
+                        Ligar PC
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (confirm(`Remover permanentemente o PC "${client.name}" da lista?`)) {
+                          removeClient(client.id);
+                        }
+                      }}
+                      className="text-xs text-red-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-300 flex items-center gap-1"
+                    >
+                      🗑️ Remover
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -367,11 +428,12 @@ export default function Network() {
             </p>
             
             <div className="grid grid-cols-2 gap-3 mb-6">
-              {[15, 30, 60, 120].map(mins => (
+              {[10, 30, 60, 120].map(mins => (
                 <button
                   key={mins}
                   onClick={() => {
-                    addTimeToSession(showAddTimeModal, mins);
+                    const rid = addTimeToSession(showAddTimeModal, mins);
+                    if (rid) void sendDeviceCommand(rid, { type: 'add_time', minutes: mins });
                     setShowAddTimeModal(null);
                   }}
                   className="py-3 bg-gray-700 hover:bg-purple-600 text-white rounded-xl transition-all font-medium border border-gray-600"
@@ -391,7 +453,10 @@ export default function Network() {
               />
               <button
                 onClick={() => {
-                  addTimeToSession(showAddTimeModal, parseInt(customMinutes));
+                  const m = parseInt(customMinutes, 10);
+                  if (!Number.isFinite(m) || m <= 0) return;
+                  const rid = addTimeToSession(showAddTimeModal, m);
+                  if (rid) void sendDeviceCommand(rid, { type: 'add_time', minutes: m });
                   setShowAddTimeModal(null);
                 }}
                 className="absolute right-2 top-1.5 px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors"

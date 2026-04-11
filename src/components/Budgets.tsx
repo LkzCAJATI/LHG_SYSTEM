@@ -9,16 +9,19 @@ import { generateBudgetPDF } from '../utils/pdfGenerator';
 import { useSettingsStore } from '../store/settingsStore';
 
 export function Budgets() {
-  const { budgets, products, addBudget, updateBudget, deleteBudget, convertBudgetToSale, setCurrentPage } = useStore();
+  const { budgets, products, users, currentUser, addBudget, updateBudget, deleteBudget, convertBudgetToSale, setCurrentPage } = useStore();
   const { settings } = useSettingsStore();
   const [showModal, setShowModal] = useState(false);
   const [editingBudget, setEditingBudget] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [showProductSearch, setShowProductSearch] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
 
   const [formData, setFormData] = useState({
     customerName: '',
+    customerCPF: '',
+    customerPhone: '',
     items: [] as BudgetItem[],
     discount: 0,
     notes: '',
@@ -52,6 +55,8 @@ export function Budgets() {
   const resetForm = () => {
     setFormData({
       customerName: '',
+      customerCPF: '',
+      customerPhone: '',
       items: [],
       discount: 0,
       notes: '',
@@ -65,6 +70,7 @@ export function Budgets() {
     });
     setEditingBudget(null);
     setProductSearch('');
+    setSelectedUserId('');
   };
 
   const handleAddItem = (product?: Product) => {
@@ -119,12 +125,18 @@ export function Budgets() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.customerName.trim() || !formData.customerCPF.trim() || !formData.customerPhone.trim()) {
+      alert('Preencha os dados do cliente: nome, CPF e telefone.');
+      return;
+    }
 
     const subtotal = formData.items.reduce((sum, item) => sum + item.totalPrice, 0);
     const total = subtotal - formData.discount;
 
     const budgetData = {
       customerName: formData.customerName || undefined,
+      customerCPF: formData.customerCPF || undefined,
+      customerPhone: formData.customerPhone || undefined,
       items: formData.items,
       subtotal,
       discount: formData.discount,
@@ -136,7 +148,7 @@ export function Budgets() {
     if (editingBudget) {
       updateBudget(editingBudget, budgetData);
     } else {
-      addBudget(budgetData);
+      addBudget(budgetData as any, selectedUserId || currentUser?.id);
     }
 
     setShowModal(false);
@@ -150,6 +162,8 @@ export function Budgets() {
     setEditingBudget(budgetId);
     setFormData({
       customerName: budget.customerName || '',
+      customerCPF: budget.customerCPF || '',
+      customerPhone: budget.customerPhone || '',
       items: budget.items,
       discount: budget.discount,
       notes: budget.notes || '',
@@ -273,15 +287,13 @@ export function Budgets() {
 
             <div className="flex flex-wrap gap-2">
               <div className="flex gap-2 w-full">
-                {budget.status === 'pending' && (
-                  <button
-                    onClick={() => handleEdit(budget.id)}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center justify-center gap-1 text-sm font-medium"
-                  >
-                    <Edit className="w-4 h-4" />
-                    Editar
-                  </button>
-                )}
+                <button
+                  onClick={() => handleEdit(budget.id)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center justify-center gap-1 text-sm font-medium"
+                >
+                  <Edit className="w-4 h-4" />
+                  Editar
+                </button>
                 <button
                   onClick={() => handleConvertToSale(budget.id)}
                   className="flex-1 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center gap-1 text-sm font-medium"
@@ -335,9 +347,27 @@ export function Budgets() {
             </h3>
             
             <form onSubmit={handleSubmit} className="space-y-4">
+              {!editingBudget && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Funcionário Responsável
+                  </label>
+                  <select
+                    value={selectedUserId || currentUser?.id || ''}
+                    onChange={(e) => setSelectedUserId(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    {users.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({(u.prefix || '?').toUpperCase()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Cliente (opcional)
+                  Cliente *
                 </label>
                 <input
                   type="text"
@@ -345,7 +375,36 @@ export function Budgets() {
                   onChange={(e) => setFormData(prev => ({ ...prev, customerName: e.target.value }))}
                   className="w-full px-3 py-2 border rounded-lg"
                   placeholder="Nome do cliente"
+                  required
                 />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    CPF *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.customerCPF}
+                    onChange={(e) => setFormData(prev => ({ ...prev, customerCPF: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    placeholder="000.000.000-00"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Telefone *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.customerPhone}
+                    onChange={(e) => setFormData(prev => ({ ...prev, customerPhone: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    placeholder="(00) 00000-0000"
+                    required
+                  />
+                </div>
               </div>
 
               {/* Busca no Estoque */}

@@ -18,6 +18,10 @@ interface SystemSettings {
   // Impressão
   printerType: 'thermal' | 'a4';
   receiptWidth: 58 | 80;
+  /** Nome exato da fila no Windows (Painel de Impressão). Vazio = padrão. */
+  thermalPrinterName: string;
+  /** Cupom PDV via ESC/POS RAW no app Windows (recomendado para POS-58). */
+  thermalEscPos: boolean;
   
   // Rede
   serverHost: string;
@@ -26,9 +30,13 @@ interface SystemSettings {
   // Outros
   currency: string;
   lowStockAlert: number;
+  stockDeductionPolicy: 'on_approval' | 'on_service_start' | 'on_completion';
+
   
   // Modelos de Documentos
   saleContractTemplate: string;
+  /** Prestação de serviços / reparo (Fluxo OS). */
+  repairContractTemplate: string;
   purchaseContractTemplate: string;
   osTermsTemplate: string;
   budgetRulesTemplate: string;
@@ -53,11 +61,15 @@ const defaultSettings: SystemSettings = {
   extraControllerPrice: 3,
   printerType: 'thermal',
   receiptWidth: 80,
+  thermalPrinterName: '',
+  thermalEscPos: true,
   serverHost: 'localhost',
   serverPort: 8080,
   currency: 'R$',
   lowStockAlert: 5,
-  saleContractTemplate: `CONTRATO DE COMPRA E VENDA PARCELADA\n\nPelo presente instrumento particular, as partes abaixo identificadas:\nVENDEDOR: {{LOJA}}\nCLIENTE (Comprador): {{CLIENTE}}\nCPF: {{CPF}}\n\ntêm entre si justo e contratado o seguinte:\n\nCLÁUSULA 1 - DO OBJETO\nO presente contrato tem como objeto a compra de {{OBJETO}} em perfeito funcionamento.\n\nCLÁUSULA 2 - DO VALOR\nO valor total do produto é de {{VALOR_TOTAL}}.\n\nCLÁUSULA 3 - DA FORMA DE PAGAMENTO\nO cliente pagará o valor da seguinte forma: {{FORMA_PAGAMENTO}}.\n\nCLÁUSULA 5 - DA GARANTIA\nO produto possui garantia de 90 dias contra defeitos de funcionamento.`,
+  stockDeductionPolicy: 'on_approval',
+  saleContractTemplate: `CONTRATO DE COMPRA E VENDA PARCELADA\n\nPelo presente instrumento particular, as partes abaixo identificadas:\nVENDEDOR: {{LOJA}}\nCLIENTE (Comprador): {{CLIENTE}}\nCPF: {{CPF}}\n\ntêm entre si justo e contratado o seguinte:\n\nCLÁUSULA 1 – DO OBJETO\nO presente contrato tem como objeto a compra de {{OBJETO}} em perfeito funcionamento, testado no ato da entrega.\n\nCLÁUSULA 2 – DO VALOR\nO valor total do produto é de {{VALOR_TOTAL}}.\n\nCLÁUSULA 3 – DA FORMA DE PAGAMENTO\nO cliente pagará o valor da seguinte forma:\n{{FORMA_PAGAMENTO}}.\n\nCLÁUSULA 4 – DA ENTREGA DO PRODUTO\nO produto será entregue ao CLIENTE após o pagamento.\n\nCLÁUSULA 5 – DA GARANTIA\nO produto possui garantia de 90 dias contra defeitos de funcionamento, não cobrindo:\nMau uso;\nQuedas;\nDanos elétricos;\nInstalação de programas indevidos;\nViolação do lacre da loja.\n\nCLÁUSULA 6 – DA INADIMPLêNCIA\nO não pagamento de 2 parcelas consecutivas poderá resultar na cobrança administrativa ou judicial do débito.\n\nCLÁUSULA 7 – DA QUITAÇÃO\nApós o pagamento total do valor acordado, será emitido recibo de quitação total, encerrando-se as obrigações entre as partes.\n\nCLÁUSULA 9 – DO FORO\nFica eleito o foro da comarca de Cajati/SP para dirimir quaisquer dúvidas oriundas deste contrato.\nE por estarem de acordo, assinam o presente contrato em duas vias de igual teor.\n\nLocal: Av. dos Trabalhadores, 59 - Centro - CAJATI/SP\nData: {{DATA}}`,
+  repairContractTemplate: `CONTRATO DE PRESTAÇÃO DE SERVIÇOS\n\nCONTRATANTE: {{CLIENTE}} — CPF: {{CPF}}\nPRESTADOR: {{LOJA}}\n\nCLÁUSULA 1 – DO OBJETO\nPrestação de serviços técnicos de reparo/manutenção referente a: {{OBJETO}}.\n\nCLÁUSULA 2 – DO VALOR\nValor total: {{VALOR_TOTAL}}.\n\nCLÁUSULA 3 – DA FORMA DE PAGAMENTO\n{{FORMA_PAGAMENTO}}\n\nCLÁUSULA 4 – DA GARANTIA\n{{GARANTIA}}\n\nCLÁUSULA 5 – DA INADIMPLêNCIA / MULTA\n{{INADIMPLENCIA}}\n\nData: {{DATA}}`,
   purchaseContractTemplate: `CONTRATO DE RECOMPRA DE EQUIPAMENTO\n\nVENDEDOR: {{CLIENTE}}\nCOMPRADOR: {{LOJA}}\n\nOBJETO: Compra de {{OBJETO}} pela loja pelo valor de {{VALOR_TOTAL}} como parte de pagamento ou compra direta.`,
   osTermsTemplate: `REGRAS DE ORÇAMENTO / CONSERTO
 - Este orçamento possui validade de até 7 dias após a data de emissão.
@@ -103,7 +115,7 @@ export const useSettingsStore = create<SettingsStore>()(
         })),
     }),
     {
-      name: 'gamezone-settings',
+      name: 'lhg-settings',
       merge: (persistedState, currentState) => {
         const persisted = persistedState as { settings?: Partial<SystemSettings> } | undefined;
         const persistedSettings = persisted?.settings ?? {};
@@ -111,6 +123,12 @@ export const useSettingsStore = create<SettingsStore>()(
           ...defaultSettings,
           ...persistedSettings,
         };
+        if (typeof mergedSettings.thermalEscPos !== 'boolean') {
+          mergedSettings.thermalEscPos = defaultSettings.thermalEscPos;
+        }
+        if (typeof mergedSettings.thermalPrinterName !== 'string') {
+          mergedSettings.thermalPrinterName = defaultSettings.thermalPrinterName;
+        }
 
         if (mergedSettings.systemName === 'GameZone Manager') {
           mergedSettings.systemName = 'LHG SYSTEM';

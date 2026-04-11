@@ -1,17 +1,23 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
 import { useNetworkStore } from '../store/networkStore';
-import { Device } from '../types';
+import { Device, Session } from '../types';
+import { sessionRemainingSeconds } from '../utils/sessionRemaining';
+import { formatMinutesBr, minutesToReais } from '../utils/formatMinutesBr';
+import { useSettingsStore } from '../store/settingsStore';
 import {
   Monitor, Gamepad2, Plus, Square,
-  X, Check, Power, RotateCw, Lock, Unlock, Wifi, WifiOff
+  X, Check, Power, RotateCw, Lock, Unlock, Wifi, WifiOff, ArrowLeftRight
 } from 'lucide-react';
+import { pushTimeTransferNetworkSync } from '../store/networkStore';
 
 export function Dashboard() {
+  const { settings } = useSettingsStore();
   const { 
     devices, updateDevice, addDevice, 
     endSessionSavingTime, pauseSession, resumeSession,
-    customers, removeCredits, startSession 
+    customers, removeCredits, startSession,
+    transferTimeBetweenDevices
   } = useStore();
   const { 
     isServerRunning, 
@@ -21,6 +27,8 @@ export function Dashboard() {
     shutdownDevice,
     restartDevice,
     isDeviceConnected,
+    sendPcUnlockStartSession,
+    sendDeviceCommand,
     startServer,
     stopServer
   } = useNetworkStore();
@@ -34,34 +42,46 @@ export function Dashboard() {
     name: '',
     type: 'pc' as 'pc' | 'console' | 'arcade',
     pricePerHour: 5,
+    /** Mesmo ID configurado no cliente (ex.: pc-01) — evita comando na rede ir para UUID errado */
+    stationClientId: '',
+    stationIp: '',
   });
 
   const [showCreditModal, setShowCreditModal] = useState(false);
   const [creditCustomerSearch, setCreditCustomerSearch] = useState('');
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<any>(null);
-  const [creditHours, setCreditHours] = useState(1);
+  /** Minutos a liberar; some com +10 / +30 / +1h / +2h (limitado ao saldo do cliente). */
+  const [creditReleaseMinutes, setCreditReleaseMinutes] = useState(0);
   const [showCreditSuggestions, setShowCreditSuggestions] = useState(false);
 
-  // Estado do tempo em sessão
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferFromDevice, setTransferFromDevice] = useState<Device | null>(null);
+  const [transferToDeviceId, setTransferToDeviceId] = useState('');
+
+  /** Contagem regressiva (tempo restante), igual ao PWA — evita “reset” visual na transferência. */
   const [sessionTimes, setSessionTimes] = useState<Record<string, string>>({});
 
-  // Atualizar tempos das sessões a cada segundo
   useEffect(() => {
-    const interval = setInterval(() => {
+    const tick = () => {
       const times: Record<string, string> = {};
-      devices.forEach(device => {
-        if ((device.status === 'in_use' || device.status === 'paused') && device.currentSession?.startTime) {
-          const session = device.currentSession;
-          const nowMs = session.isPaused && session.pausedAt ? new Date(session.pausedAt).getTime() : Date.now();
-          const diff = Math.max(0, nowMs - new Date(session.startTime).getTime() - (session.totalPausedTime || 0));
-          const hours = Math.floor(diff / 3600000);
-          const minutes = Math.floor((diff % 3600000) / 60000);
-          const seconds = Math.floor((diff % 60000) / 1000);
+      devices.forEach((device) => {
+        const session = device.currentSession;
+        if (
+          (device.status === 'in_use' || device.status === 'paused') &&
+          session?.startTime &&
+          !session?.isPendingStart
+        ) {
+          const rem = Math.max(0, sessionRemainingSeconds(session));
+          const hours = Math.floor(rem / 3600);
+          const minutes = Math.floor((rem % 3600) / 60);
+          const seconds = rem % 60;
           times[device.id] = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
         }
       });
       setSessionTimes(times);
-    }, 1000);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [devices]);
 
@@ -99,23 +119,45 @@ export function Dashboard() {
     }
   };
 
+  const getDeviceTypeLabel = (type: Device['type']) => {
+    switch (type) {
+      case 'pc': return 'PC';
+      case 'console': return 'Console';
+      case 'playstation': return 'PlayStation';
+      case 'arcade': return 'Fliperama';
+    }
+  };
+
+  const calcRemainingMinutes = (session?: Session) => {
+    if (!session?.startTime) return 0;
+    return Math.floor(sessionRemainingSeconds(session) / 60);
+  };
+
   const handleAddDevice = () => {
     if (!newDevice.name) return;
     
+    const sid = newDevice.stationClientId.trim();
+    const sip = newDevice.stationIp.trim();
     addDevice({
       name: newDevice.name,
       type: newDevice.type,
       status: 'available',
       pricePerHour: newDevice.pricePerHour,
+      ...(newDevice.type === 'pc' && sid ? { suggestedClientId: sid } : {}),
+      ...(newDevice.type === 'pc' && sip ? { ip: sip } : {}),
+      ...(newDevice.type === 'pc' && sid ? { networkClientId: sid } : {}),
     });
     
-    setNewDevice({ name: '', type: 'pc', pricePerHour: 5 });
+    setNewDevice({ name: '', type: 'pc', pricePerHour: 5, stationClientId: '', stationIp: '' });
     setShowAddDevice(false);
   };
 
   const handleEndSession = (deviceId: string) => {
     const device = devices.find(d => d.id === deviceId);
     if (device?.currentSession) {
+      if (device.type === 'pc' && isDeviceConnected(device.id)) {
+        void sendDeviceCommand(device.id, { type: 'end_session' });
+      }
       endSessionSavingTime(device.currentSession.id);
     }
   };
@@ -150,7 +192,11 @@ export function Dashboard() {
   const handleStartWithCredits = async () => {
     if (!selectedDevice || !selectedCreditCustomer) return;
 
-    const minutesToUse = creditHours * 60;
+    const minutesToUse = creditReleaseMinutes;
+    if (minutesToUse <= 0) {
+      alert('Defina quanto tempo liberar (use os atalhos ou informe minutos).');
+      return;
+    }
     if (selectedCreditCustomer.credits < minutesToUse) {
       alert('Cliente não possui créditos suficientes!');
       return;
@@ -163,13 +209,17 @@ export function Dashboard() {
     startSession(
       selectedDevice.id, 
       selectedCreditCustomer.name, 
-      creditHours, 
+      minutesToUse / 60, 
       0, 
       selectedCreditCustomer.id
     );
 
-    // 3. Desbloquear máquina se for PC
-    if (selectedDevice.type === 'pc') {
+    if (selectedDevice.type === 'pc' && isDeviceConnected(selectedDevice.id)) {
+      const newSession = useStore.getState().devices.find((d) => d.id === selectedDevice.id)?.currentSession;
+      if (newSession?.id) {
+        void sendPcUnlockStartSession(selectedDevice.id, newSession.id, minutesToUse);
+      }
+    } else if (selectedDevice.type === 'pc') {
       await unlockDevice(selectedDevice.id);
     }
 
@@ -177,6 +227,12 @@ export function Dashboard() {
     setSelectedDevice(null);
     setSelectedCreditCustomer(null);
     setCreditCustomerSearch('');
+    setCreditReleaseMinutes(0);
+  };
+
+  const closeCreditModal = () => {
+    setShowCreditModal(false);
+    setCreditReleaseMinutes(0);
   };
 
   const availableDevices = devices.filter(d => d.status === 'available').length;
@@ -356,10 +412,19 @@ export function Dashboard() {
               <div className="p-4">
                 {(device.status === 'in_use' || device.status === 'paused') && device.currentSession && (
                   <div className="mb-3">
-                    <div className="text-xs text-gray-500 mb-1">Tempo de Uso</div>
-                    <div className={`text-xl font-mono font-bold ${device.status === 'paused' ? 'text-orange-500 opacity-80' : 'text-gray-800'}`}>
-                      {sessionTimes[device.id] || '00:00:00'}
-                    </div>
+                    {device.currentSession.isPendingStart ? (
+                      <div className="flex items-center gap-2 text-blue-500 bg-blue-50 px-2 py-1.5 rounded-lg border border-blue-200">
+                        <span className="animate-pulse text-base">⏳</span>
+                        <span className="text-sm font-semibold">Aguardando PC iniciar...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-xs text-gray-500 mb-1">Tempo restante</div>
+                        <div className={`text-xl font-mono font-bold ${device.status === 'paused' ? 'text-orange-500 opacity-80' : 'text-gray-800'}`}>
+                          {sessionTimes[device.id] || '00:00:00'}
+                        </div>
+                      </>
+                    )}
                     {device.currentSession.customerName && (
                       <div className="text-sm text-gray-600 mt-1 truncate">
                         👤 {device.currentSession.customerName}
@@ -382,28 +447,55 @@ export function Dashboard() {
                 {/* Botões de Ação */}
                 <div className="space-y-2">
                   {(device.status === 'in_use' || device.status === 'paused') && device.currentSession && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          device.status === 'in_use' ? pauseSession(device.currentSession!.id) : resumeSession(device.currentSession!.id);
-                        }}
-                        className={`flex-1 py-1 px-2 text-white rounded text-sm font-bold transition-colors ${
-                          device.status === 'in_use' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-500 hover:bg-green-600'
-                        }`}
-                      >
-                        {device.status === 'in_use' ? '⏸ Pausar' : '▶ Retomar'}
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEndSession(device.id);
-                        }}
-                        className="flex-1 flex items-center justify-center gap-1 py-1 px-2 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-bold transition-colors"
-                      >
-                        <Square className="w-3 h-3" />
-                        Finalizar
-                      </button>
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (device.status === 'in_use') {
+                              pauseSession(device.currentSession!.id);
+                              if (device.type === 'pc' && isDeviceConnected(device.id)) {
+                                void sendDeviceCommand(device.id, { type: 'pause' });
+                              }
+                            } else {
+                              resumeSession(device.currentSession!.id);
+                              if (device.type === 'pc' && isDeviceConnected(device.id)) {
+                                void sendDeviceCommand(device.id, { type: 'resume' });
+                              }
+                            }
+                          }}
+                          className={`flex-1 py-1 px-2 text-white rounded text-sm font-bold transition-colors ${
+                            device.status === 'in_use' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-500 hover:bg-green-600'
+                          }`}
+                        >
+                          {device.status === 'in_use' ? '⏸ Pausar' : '▶ Retomar'}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEndSession(device.id);
+                          }}
+                          className="flex-1 flex items-center justify-center gap-1 py-1 px-2 bg-red-500 hover:bg-red-600 text-white rounded text-sm font-bold transition-colors"
+                        >
+                          <Square className="w-3 h-3" />
+                          Finalizar
+                        </button>
+                      </div>
+                      {!device.currentSession.isPendingStart && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTransferFromDevice(device);
+                            setTransferToDeviceId('');
+                            setShowTransferModal(true);
+                          }}
+                          className="w-full flex items-center justify-center gap-1 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm font-bold transition-colors"
+                          title="Transferir o tempo restante para outro dispositivo"
+                        >
+                          <ArrowLeftRight className="w-3 h-3" />
+                          Transferir tempo
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -543,6 +635,34 @@ export function Dashboard() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
+
+              {newDevice.type === 'pc' && (
+                <div className="space-y-3 rounded-lg border border-purple-100 bg-purple-50/50 p-3">
+                  <p className="text-xs text-gray-600">
+                    Para comandos (liberar tempo) chegarem no PC cliente, o cadastro deve casar com o terminal: use o mesmo ID (ex. <code className="text-purple-800">pc-01</code>) ou o IP fixo da máquina.
+                  </p>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">ID no cliente (opcional)</label>
+                    <input
+                      type="text"
+                      value={newDevice.stationClientId}
+                      onChange={(e) => setNewDevice((prev) => ({ ...prev, stationClientId: e.target.value }))}
+                      placeholder="pc-01"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">IP do PC (opcional, fallback)</label>
+                    <input
+                      type="text"
+                      value={newDevice.stationIp}
+                      onChange={(e) => setNewDevice((prev) => ({ ...prev, stationIp: e.target.value }))}
+                      placeholder="192.168.1.50"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 mt-6">
@@ -612,15 +732,22 @@ export function Dashboard() {
                   <div className="flex items-center justify-between py-2 border-b">
                     <span className="text-gray-600">Início</span>
                     <span className="font-medium">
-                      {new Date(selectedDevice.currentSession.startTime).toLocaleTimeString('pt-BR')}
+                      {selectedDevice.currentSession.isPendingStart
+                        ? <span className="text-blue-500 text-sm">⏳ Aguardando boot...</span>
+                        : selectedDevice.currentSession.startTime
+                          ? new Date(selectedDevice.currentSession.startTime).toLocaleTimeString('pt-BR')
+                          : '-'
+                      }
                     </span>
                   </div>
-                  <div className="flex items-center justify-between py-2 border-b">
-                    <span className="text-gray-600">Tempo</span>
-                    <span className="font-mono font-bold text-lg">
-                      {sessionTimes[selectedDevice.id] || '00:00:00'}
-                    </span>
-                  </div>
+                  {!selectedDevice.currentSession.isPendingStart && (
+                    <div className="flex items-center justify-between py-2 border-b">
+                      <span className="text-gray-600">Tempo restante</span>
+                      <span className="font-mono font-bold text-lg">
+                        {sessionTimes[selectedDevice.id] || '00:00:00'}
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -629,14 +756,33 @@ export function Dashboard() {
             <div className="mt-6 space-y-2">
               {selectedDevice.status === 'available' && (
                 <button
-                  onClick={() => setShowCreditModal(true)}
+                  onClick={() => {
+                    setCreditReleaseMinutes(0);
+                    setShowCreditModal(true);
+                  }}
                   className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-lg transition-all transform hover:scale-[1.02]"
                 >
                   <Unlock className="w-5 h-5" />
                   Liberar com Créditos
                 </button>
               )}
-              {selectedDevice.status === 'in_use' && (
+              {(selectedDevice.status === 'in_use' || selectedDevice.status === 'paused') &&
+                selectedDevice.currentSession &&
+                !selectedDevice.currentSession.isPendingStart && (
+                <button
+                  onClick={() => {
+                    setTransferFromDevice(selectedDevice);
+                    setTransferToDeviceId('');
+                    setShowTransferModal(true);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
+                >
+                  <ArrowLeftRight className="w-4 h-4" />
+                  Transferir tempo
+                </button>
+              )}
+              {(selectedDevice.status === 'in_use' || selectedDevice.status === 'paused') &&
+                selectedDevice.currentSession && (
                 <button
                   onClick={() => {
                     handleEndSession(selectedDevice.id);
@@ -723,9 +869,89 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* Modal Transferir Tempo */}
+      {showTransferModal && transferFromDevice?.currentSession && (
+        <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-[70] p-2 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
+            <h2 className="text-lg sm:text-xl font-bold mb-2">Transferir tempo</h2>
+            <p className="text-sm text-gray-600 mb-4 leading-relaxed">
+              Origem: <strong>{transferFromDevice.name}</strong> — restante aproximado:{' '}
+              <strong>{calcRemainingMinutes(transferFromDevice.currentSession)} min</strong>
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Destino</label>
+                <select
+                  value={transferToDeviceId}
+                  onChange={(e) => setTransferToDeviceId(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm sm:text-base"
+                >
+                  <option value="">Selecione...</option>
+                  {devices
+                    .filter((d) => d.id !== transferFromDevice.id)
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({getDeviceTypeLabel(d.type)}) —{' '}
+                        {d.status === 'available'
+                          ? 'Disponível'
+                          : d.status === 'in_use'
+                            ? 'Em uso'
+                            : d.status === 'paused'
+                              ? 'Pausado'
+                              : 'Manutenção'}
+                      </option>
+                    ))}
+                </select>
+                <p className="mt-2 text-xs text-gray-500">
+                  O destino precisa estar <strong>disponível</strong>. Todos os aparelhos aparecem na lista.
+                </p>
+              </div>
+
+              <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+                Será transferido o <strong>tempo restante exato</strong> da origem (incluindo segundos). A origem fica disponível.
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTransferModal(false)}
+                  className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!transferFromDevice?.currentSession) return;
+                    if (!transferToDeviceId) {
+                      alert('Selecione um destino.');
+                      return;
+                    }
+                    const res = transferTimeBetweenDevices({
+                      fromDeviceId: transferFromDevice.id,
+                      toDeviceId: transferToDeviceId
+                    });
+                    if (!res.ok) {
+                      alert(res.error || 'Falha ao transferir.');
+                      return;
+                    }
+                    pushTimeTransferNetworkSync(transferFromDevice.id, transferToDeviceId);
+                    setShowTransferModal(false);
+                  }}
+                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
+                >
+                  Transferir
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Lançar Créditos */}
       {showCreditModal && selectedDevice && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]" onClick={() => setShowCreditModal(false)}>
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]" onClick={closeCreditModal}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
@@ -734,7 +960,7 @@ export function Dashboard() {
                 </div>
                 <h2 className="text-xl font-bold text-gray-800">Liberar com Créditos</h2>
               </div>
-              <button onClick={() => setShowCreditModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+              <button onClick={closeCreditModal} className="text-gray-400 hover:text-gray-600 transition-colors">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -780,7 +1006,7 @@ export function Dashboard() {
                           </div>
                           <div className="text-right">
                             <p className="text-sm font-black text-indigo-600">
-                              {(customer.credits / 60).toFixed(1)}h
+                              {formatMinutesBr(customer.credits)}
                             </p>
                             <p className="text-[10px] text-gray-400">Saldo</p>
                           </div>
@@ -795,44 +1021,70 @@ export function Dashboard() {
                   <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-4">
                     <div className="flex justify-between items-center">
                       <div>
-                        <p className="text-xs text-indigo-600 font-bold uppercase tracking-wider">Saldo Disponível</p>
+                        <p className="text-xs text-indigo-600 font-bold uppercase tracking-wider">Saldo disponível</p>
                         <p className="text-2xl font-black text-indigo-900">
-                          {selectedCreditCustomer.credits} <span className="text-sm font-normal">minutos</span>
+                          {formatMinutesBr(selectedCreditCustomer.credits)}
                         </p>
-                      </div>
-                      <div className="text-right">
-                         <p className="text-xl font-bold text-indigo-700">
-                           {(selectedCreditCustomer.credits / 60).toFixed(1)}h
-                         </p>
+                        <p className="text-xs text-indigo-700/80 mt-1">
+                          ≈ R$ {minutesToReais(selectedCreditCustomer.credits, settings.pcPricePerHour).toFixed(2)} (tarifa PC/h)
+                        </p>
                       </div>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">Quanto tempo liberar?</label>
-                    <div className="flex items-center justify-between bg-gray-100 rounded-2xl p-2">
-                       <button 
-                         onClick={() => setCreditHours(Math.max(0.5, creditHours - 0.5))}
-                         className="w-12 h-12 rounded-xl bg-white shadow-sm hover:bg-gray-50 flex items-center justify-center text-xl font-bold text-gray-600 transition-all"
-                       >
-                         -
-                       </button>
-                       <div className="text-center">
-                         <span className="text-3xl font-black text-gray-800">{creditHours}</span>
-                         <span className="text-lg font-bold text-gray-400 ml-1">horas</span>
-                       </div>
-                       <button 
-                         onClick={() => setCreditHours(creditHours + 0.5)}
-                         className="w-12 h-12 rounded-xl bg-white shadow-sm hover:bg-gray-50 flex items-center justify-center text-xl font-bold text-gray-600 transition-all"
-                       >
-                         +
-                       </button>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Quanto tempo liberar?</label>
+                    <p className="text-sm text-gray-600 mb-3">
+                      Liberando: <strong>{formatMinutesBr(creditReleaseMinutes)}</strong>
+                      {creditReleaseMinutes > 0 && (
+                        <span className="text-gray-500">
+                          {' '}
+                          · ≈ R$ {minutesToReais(creditReleaseMinutes, selectedDevice.pricePerHour).toFixed(2)} (tarifa deste aparelho)
+                        </span>
+                      )}
+                    </p>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {[10, 30, 60, 120].map((add) => (
+                        <button
+                          key={add}
+                          type="button"
+                          onClick={() =>
+                            setCreditReleaseMinutes((m) =>
+                              Math.min(selectedCreditCustomer.credits, m + add)
+                            )
+                          }
+                          className="flex-1 min-w-[4.5rem] py-2.5 rounded-xl bg-gray-100 hover:bg-indigo-100 text-gray-800 font-semibold text-sm border border-gray-200"
+                        >
+                          +{add === 60 ? '1h' : add === 120 ? '2h' : `${add}min`}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setCreditReleaseMinutes(0)}
+                        className="py-2.5 px-3 rounded-xl text-sm border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      >
+                        Zerar
+                      </button>
                     </div>
-                    {creditHours * 60 > selectedCreditCustomer.credits && (
-                      <p className="text-red-500 text-xs mt-2 font-bold flex items-center gap-1">
-                        <X className="w-3 h-3" /> Saldo insuficiente para este tempo!
-                      </p>
-                    )}
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Ou digite o total (minutos)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={selectedCreditCustomer.credits}
+                      value={creditReleaseMinutes === 0 ? '' : creditReleaseMinutes}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === '') {
+                          setCreditReleaseMinutes(0);
+                          return;
+                        }
+                        const v = Math.floor(Number(raw));
+                        if (!Number.isFinite(v) || v < 0) setCreditReleaseMinutes(0);
+                        else setCreditReleaseMinutes(Math.min(selectedCreditCustomer.credits, v));
+                      }}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                      placeholder="0"
+                    />
                   </div>
                 </div>
               )}
@@ -840,14 +1092,18 @@ export function Dashboard() {
 
             <div className="flex gap-3 mt-8">
               <button
-                onClick={() => setShowCreditModal(false)}
+                onClick={closeCreditModal}
                 className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleStartWithCredits}
-                disabled={!selectedCreditCustomer || (creditHours * 60 > selectedCreditCustomer.credits)}
+                disabled={
+                  !selectedCreditCustomer ||
+                  creditReleaseMinutes <= 0 ||
+                  creditReleaseMinutes > selectedCreditCustomer.credits
+                }
                 className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white rounded-xl font-bold transition-all shadow-lg shadow-indigo-200 disabled:shadow-none"
               >
                 Liberar Agora

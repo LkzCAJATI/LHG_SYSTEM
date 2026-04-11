@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useReducer, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { useNetworkStore } from '../store/networkStore';
+import { useNetworkStore, pushTimeTransferNetworkSync } from '../store/networkStore';
 import { Device, Customer, Session } from '../types';
+import { sessionRemainingSeconds } from '../utils/sessionRemaining';
+import { formatMinutesBr } from '../utils/formatMinutesBr';
+
+const DURATION_PRESETS_MIN = [10, 30, 60, 120] as const;
+const MAX_SESSION_MINUTES = 24 * 60;
 
 // Ícone de Monitor
 const MonitorIcon = () => (
@@ -25,7 +30,7 @@ const JoystickIcon = () => (
 );
 
 const Devices: React.FC = () => {
-  const { devices, customers, startSession, endSessionSavingTime, pauseSession, resumeSession } = useStore();
+  const { devices, customers, startSession, endSessionSavingTime, pauseSession, resumeSession, transferTimeBetweenDevices } = useStore();
   const { 
     isServerRunning, 
     connectedClients, 
@@ -34,6 +39,9 @@ const Devices: React.FC = () => {
     shutdownDevice, 
     restartDevice,
     isDeviceConnected,
+    sendPcUnlockStartSession,
+    sendDeviceCommand,
+    resolveCommandTargetId,
     startRemoteDesktop,
     remoteDesktopSession,
     stopRemoteDesktop,
@@ -41,20 +49,49 @@ const Devices: React.FC = () => {
     stopServer
   } = useNetworkStore();
   
-  const [activeFilter, setActiveFilter] = useState<'all' | 'pc' | 'console' | 'arcade'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'pc' | 'consoles' | 'arcade'>('all');
   const [isScanning, setIsScanning] = useState(false);
   const [showStartModal, setShowStartModal] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [customerName, setCustomerName] = useState('');
-  const [duration, setDuration] = useState(60); // minutos
+  /** Soma por cliques nos atalhos (+10 / +30 / +1h / +2h), até 24 h. */
+  const [duration, setDuration] = useState(0);
   const [extraControllers, setExtraControllers] = useState(0);
   const [showRemoteModal, setShowRemoteModal] = useState(false);
   const [remoteMessage, setRemoteMessage] = useState('');
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferFromDevice, setTransferFromDevice] = useState<Device | null>(null);
+  const [transferToDeviceId, setTransferToDeviceId] = useState<string>('');
+  /** Atualiza cards a cada 1s para contagem regressiva (tempo restante). */
+  const [, bumpSessionClock] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    const id = window.setInterval(() => bumpSessionClock(), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const getDeviceTypeLabel = (type: Device['type']) => {
+    switch (type) {
+      case 'pc':
+        return 'PC';
+      case 'console':
+        return 'Console';
+      case 'playstation':
+        return 'PlayStation';
+      case 'arcade':
+        return 'Fliperama';
+    }
+  };
+
+  const calcRemainingMinutes = (session?: Session) => {
+    if (!session?.startTime) return 0;
+    return Math.floor(sessionRemainingSeconds(session) / 60);
+  };
 
   // Estado para busca de cliente cadastrado
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [useRegisteredCustomer, setUseRegisteredCustomer] = useState(false);
+  const [useCustomerCreditsAuto, setUseCustomerCreditsAuto] = useState(true);
 
   const filteredCustomers = customerSearch.length >= 2
     ? customers.filter(c =>
@@ -67,6 +104,7 @@ const Devices: React.FC = () => {
     switch (type) {
       case 'pc': return <MonitorIcon />;
       case 'console': return <GamepadIcon />;
+      case 'playstation': return <GamepadIcon />;
       case 'arcade': return <JoystickIcon />;
     }
   };
@@ -89,8 +127,11 @@ const Devices: React.FC = () => {
     }
   };
 
+  const isConsoleLike = (d: Device) => d.type === 'console' || d.type === 'playstation';
+
   const filteredDevices = devices.filter(d => {
     if (activeFilter === 'all') return true;
+    if (activeFilter === 'consoles') return isConsoleLike(d);
     return d.type === activeFilter;
   });
 
@@ -101,27 +142,56 @@ const Devices: React.FC = () => {
         return;
       }
     }
+    setDuration(0);
     setSelectedDevice(device);
     setShowStartModal(true);
   };
 
   const handleConfirmStart = () => {
     if (!selectedDevice) return;
+
+    const selectedCustomerCredits = selectedCustomer?.credits || 0;
+    const usingAutoCredits = useRegisteredCustomer && !!selectedCustomer && useCustomerCreditsAuto;
+    const finalDuration = usingAutoCredits ? selectedCustomerCredits : duration;
+
+    if (usingAutoCredits && selectedCustomerCredits <= 0) {
+      alert('Este cliente não possui créditos disponíveis.');
+      return;
+    }
+    if (!Number.isFinite(finalDuration) || finalDuration <= 0) {
+      alert('Duração inválida.');
+      return;
+    }
+
     const name = selectedCustomer ? selectedCustomer.name : (customerName || 'Cliente');
     const custId = selectedCustomer ? selectedCustomer.id : undefined;
-    startSession(selectedDevice.id, name, duration, extraControllers, custId);
+    const hours = finalDuration / 60;
+    startSession(selectedDevice.id, name, hours, extraControllers, custId);
+
+    if (selectedDevice.type === 'pc' && isDeviceConnected(selectedDevice.id)) {
+      const updatedDevice = useStore.getState().devices.find(d => d.id === selectedDevice.id);
+      const newSession = updatedDevice?.currentSession;
+      if (newSession?.id) {
+        void sendPcUnlockStartSession(selectedDevice.id, newSession.id, finalDuration);
+      }
+    }
+
     setShowStartModal(false);
     setSelectedDevice(null);
     setCustomerName('');
-    setDuration(60);
+    setDuration(0);
     setExtraControllers(0);
     setCustomerSearch('');
     setSelectedCustomer(null);
     setUseRegisteredCustomer(false);
+    setUseCustomerCreditsAuto(true);
   };
 
   const handleEndSession = (device: Device) => {
     if (device.currentSession) {
+      if (device.type === 'pc' && isDeviceConnected(device.id)) {
+        void sendDeviceCommand(device.id, { type: 'end_session' });
+      }
       endSessionSavingTime(device.currentSession.id);
     }
   };
@@ -147,7 +217,8 @@ const Devices: React.FC = () => {
   };
 
   const handleRemoteDesktop = (device: Device) => {
-    startRemoteDesktop(device.id);
+    const wsId = resolveCommandTargetId(device.id) || device.id;
+    startRemoteDesktop(wsId);
     setShowRemoteModal(true);
   };
 
@@ -156,28 +227,30 @@ const Devices: React.FC = () => {
     setShowRemoteModal(false);
   };
 
-  const formatDuration = (session?: Session) => {
-    if (!session || !session.startTime) return '00:00:00';
-    const nowMs = session.isPaused && session.pausedAt ? new Date(session.pausedAt).getTime() : Date.now();
-    const diff = Math.max(0, nowMs - new Date(session.startTime).getTime() - (session.totalPausedTime || 0));
-    const hours = Math.floor(diff / 3600000);
-    const minutes = Math.floor((diff % 3600000) / 60000);
-    const seconds = Math.floor((diff % 60000) / 1000);
+  const formatRemaining = (session?: Session) => {
+    if (!session?.startTime) return '00:00:00';
+    const rem = Math.max(0, sessionRemainingSeconds(session));
+    const hours = Math.floor(rem / 3600);
+    const minutes = Math.floor((rem % 3600) / 60);
+    const seconds = rem % 60;
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
   const calculatePrice = () => {
     if (!selectedDevice) return 0;
-    const hours = duration / 60;
+    const effectiveDuration = (useRegisteredCustomer && selectedCustomer && useCustomerCreditsAuto)
+      ? selectedCustomer.credits
+      : duration;
+    const hours = effectiveDuration / 60;
     let price = selectedDevice.pricePerHour * hours;
-    if (selectedDevice.type === 'console' && extraControllers > 0) {
+    if ((selectedDevice.type === 'console' || selectedDevice.type === 'playstation') && extraControllers > 0) {
       price += extraControllers * 3; // R$ 3 por controle extra
     }
     return price;
   };
 
   const pcCount = devices.filter(d => d.type === 'pc').length;
-  const consoleCount = devices.filter(d => d.type === 'console').length;
+  const consoleCount = devices.filter(d => d.type === 'console' || d.type === 'playstation').length;
   const arcadeCount = devices.filter(d => d.type === 'arcade').length;
 
   return (
@@ -269,9 +342,9 @@ const Devices: React.FC = () => {
           <MonitorIcon /> PCs
         </button>
         <button
-          onClick={() => setActiveFilter('console')}
+          onClick={() => setActiveFilter('consoles')}
           className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
-            activeFilter === 'console' 
+            activeFilter === 'consoles' 
               ? 'bg-purple-600 text-white' 
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
           }`}
@@ -313,7 +386,7 @@ const Devices: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className={`p-2 rounded-lg ${
                     device.type === 'pc' ? 'bg-purple-100 text-purple-600' :
-                    device.type === 'console' ? 'bg-blue-100 text-blue-600' :
+                    (device.type === 'console' || device.type === 'playstation') ? 'bg-blue-100 text-blue-600' :
                     'bg-orange-100 text-orange-600'
                   }`}>
                     {getDeviceIcon(device.type)}
@@ -333,9 +406,9 @@ const Devices: React.FC = () => {
               <div className="p-4">
                 {(device.status === 'in_use' || device.status === 'paused') && device.currentSession && (
                   <div className="mb-3">
-                    <div className="text-xs text-gray-500 mb-1">Tempo de Uso</div>
+                    <div className="text-xs text-gray-500 mb-1">Tempo restante</div>
                     <div className={`text-xl font-mono font-bold ${device.status === 'paused' ? 'text-orange-500 opacity-80' : 'text-gray-800'}`}>
-                      {formatDuration(device.currentSession)}
+                      {formatRemaining(device.currentSession)}
                     </div>
                     {device.currentSession.customerName && (
                       <div className="text-sm text-gray-600 mt-1">
@@ -353,7 +426,7 @@ const Devices: React.FC = () => {
                 {/* Preço */}
                 <div className="text-sm text-gray-500 mb-3">
                   R$ {device.pricePerHour.toFixed(2)}/hora
-                  {device.type === 'console' && <span className="text-xs ml-1">(+R$ 3/controle)</span>}
+                  {(device.type === 'console' || device.type === 'playstation') && <span className="text-xs ml-1">(+R$ 3/controle)</span>}
                 </div>
 
                 {/* Botões de Ação */}
@@ -370,12 +443,35 @@ const Devices: React.FC = () => {
                   {(device.status === 'in_use' || device.status === 'paused') && device.currentSession && (
                     <div className="flex flex-col gap-2">
                       <button
-                        onClick={() => device.status === 'in_use' ? pauseSession(device.currentSession!.id) : resumeSession(device.currentSession!.id)}
+                        onClick={() => {
+                          if (device.status === 'in_use') {
+                            pauseSession(device.currentSession!.id);
+                            if (device.type === 'pc' && isDeviceConnected(device.id)) {
+                              void sendDeviceCommand(device.id, { type: 'pause' });
+                            }
+                          } else {
+                            resumeSession(device.currentSession!.id);
+                            if (device.type === 'pc' && isDeviceConnected(device.id)) {
+                              void sendDeviceCommand(device.id, { type: 'resume' });
+                            }
+                          }
+                        }}
                         className={`w-full py-2 text-white rounded-lg font-medium transition-colors ${
                           device.status === 'in_use' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-500 hover:bg-green-600'
                         }`}
                       >
                         {device.status === 'in_use' ? '⏸ Pausar Tempo' : '▶ Retomar Tempo'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setTransferFromDevice(device);
+                          setTransferToDeviceId('');
+                          setShowTransferModal(true);
+                        }}
+                        className="w-full py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors"
+                        title="Transferir o tempo restante para outro dispositivo"
+                      >
+                        🔁 Transferir Tempo
                       </button>
                       <button
                         onClick={() => handleEndSession(device)}
@@ -443,7 +539,12 @@ const Devices: React.FC = () => {
               {/* Seleção: cliente com cadastro ou sem */}
               <div className="flex gap-2">
                 <button
-                  onClick={() => { setUseRegisteredCustomer(false); setSelectedCustomer(null); setCustomerSearch(''); }}
+                  onClick={() => {
+                    setUseRegisteredCustomer(false);
+                    setSelectedCustomer(null);
+                    setCustomerSearch('');
+                    setUseCustomerCreditsAuto(true);
+                  }}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
                     !useRegisteredCustomer ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
@@ -451,7 +552,11 @@ const Devices: React.FC = () => {
                   Sem cadastro
                 </button>
                 <button
-                  onClick={() => { setUseRegisteredCustomer(true); setCustomerName(''); }}
+                  onClick={() => {
+                    setUseRegisteredCustomer(true);
+                    setCustomerName('');
+                    setUseCustomerCreditsAuto(true);
+                  }}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
                     useRegisteredCustomer ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
@@ -509,7 +614,7 @@ const Devices: React.FC = () => {
                             >
                               <span className="font-medium text-gray-800">{c.name}</span>
                               <span className="text-gray-500 text-sm ml-2">@{c.username}</span>
-                              <span className="text-purple-500 text-xs ml-2">{c.credits} min</span>
+                              <span className="text-purple-500 text-xs ml-2">{formatMinutesBr(c.credits)}</span>
                             </button>
                           ))}
                         </div>
@@ -522,26 +627,63 @@ const Devices: React.FC = () => {
                 </div>
               )}
 
+              {useRegisteredCustomer && selectedCustomer && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <label className="flex items-center gap-2 text-sm font-medium text-blue-900">
+                    <input
+                      type="checkbox"
+                      checked={useCustomerCreditsAuto}
+                      onChange={(e) => setUseCustomerCreditsAuto(e.target.checked)}
+                    />
+                    Usar créditos do cliente automaticamente
+                  </label>
+                  <p className="text-xs text-blue-700 mt-1">
+                    Créditos atuais: <strong>{formatMinutesBr(selectedCustomer.credits)}</strong>
+                    {useCustomerCreditsAuto ? ' (serão usados como duração desta sessão)' : ''}
+                  </p>
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Duração (minutos)</label>
-                <div className="flex gap-2">
-                  {[30, 60, 120, 180].map(d => (
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tempo da sessão (some clicando várias vezes)
+                </label>
+                <p className="text-sm text-gray-600 mb-2">
+                  Total: <strong>{formatMinutesBr(duration)}</strong>
+                  <span className="text-gray-400 font-normal"> (máx. 24 h)</span>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {DURATION_PRESETS_MIN.map(d => (
                     <button
                       key={d}
-                      onClick={() => setDuration(d)}
-                      className={`flex-1 py-2 rounded-lg font-medium transition-colors ${
-                        duration === d 
-                          ? 'bg-purple-600 text-white' 
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      type="button"
+                      onClick={() =>
+                        setDuration(prev =>
+                          Math.min(MAX_SESSION_MINUTES, prev + d)
+                        )
+                      }
+                      disabled={useRegisteredCustomer && !!selectedCustomer && useCustomerCreditsAuto}
+                      className={`flex-1 min-w-[4.5rem] py-2 rounded-lg font-medium transition-colors bg-gray-100 text-gray-700 hover:bg-gray-200 ${
+                        (useRegisteredCustomer && !!selectedCustomer && useCustomerCreditsAuto)
+                          ? 'opacity-50 cursor-not-allowed'
+                          : ''
                       }`}
                     >
-                      {d < 60 ? `${d}min` : `${d/60}h`}
+                      +{d === 60 ? '1h' : d === 120 ? '2h' : `${d}min`}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setDuration(0)}
+                    disabled={useRegisteredCustomer && !!selectedCustomer && useCustomerCreditsAuto}
+                    className="py-2 px-3 rounded-lg text-sm border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Zerar
+                  </button>
                 </div>
               </div>
 
-              {selectedDevice.type === 'console' && (
+              {(selectedDevice.type === 'console' || selectedDevice.type === 'playstation') && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Controles Extras (+R$ 3,00 cada)</label>
                   <div className="flex gap-2">
@@ -570,7 +712,12 @@ const Devices: React.FC = () => {
                   </span>
                 </div>
                 <div className="text-sm text-gray-500 mt-1">
-                  {duration} minutos × R$ {selectedDevice.pricePerHour.toFixed(2)}/hora
+                  {formatMinutesBr(
+                    (useRegisteredCustomer && selectedCustomer && useCustomerCreditsAuto)
+                      ? selectedCustomer.credits
+                      : duration
+                  )}{' '}
+                  × R$ {selectedDevice.pricePerHour.toFixed(2)}/hora
                   {extraControllers > 0 && ` + ${extraControllers} × R$ 3,00`}
                 </div>
               </div>
@@ -581,6 +728,7 @@ const Devices: React.FC = () => {
                 onClick={() => {
                   setShowStartModal(false);
                   setSelectedDevice(null);
+                  setUseCustomerCreditsAuto(true);
                 }}
                 className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium"
               >
@@ -592,6 +740,77 @@ const Devices: React.FC = () => {
               >
                 Confirmar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Transferir Tempo */}
+      {showTransferModal && transferFromDevice?.currentSession && (
+        <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
+            <h2 className="text-lg sm:text-xl font-bold mb-2">Transferir Tempo</h2>
+            <p className="text-sm text-gray-600 mb-4 leading-relaxed">
+              Origem: <strong>{transferFromDevice.name}</strong> — restante aproximado:{' '}
+              <strong>{calcRemainingMinutes(transferFromDevice.currentSession)} min</strong>
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Destino</label>
+                <select
+                  value={transferToDeviceId}
+                  onChange={(e) => setTransferToDeviceId(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm sm:text-base"
+                >
+                  <option value="">Selecione...</option>
+                  {devices
+                    .filter(d => d.id !== transferFromDevice.id)
+                    .map(d => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({getDeviceTypeLabel(d.type)}) - {d.status === 'available' ? 'Disponível' : d.status === 'in_use' ? 'Em uso' : d.status === 'paused' ? 'Pausado' : 'Manutenção'}
+                      </option>
+                    ))}
+                </select>
+                <p className="mt-2 text-xs text-gray-500">
+                  Todos os aparelhos aparecem na lista, inclusive offline.
+                </p>
+              </div>
+
+              <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+                Será transferido o <strong>tempo restante exato</strong> da origem (incluindo segundos). A origem fica disponível.
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                <button
+                  onClick={() => setShowTransferModal(false)}
+                  className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    if (!transferFromDevice?.currentSession) return;
+                    if (!transferToDeviceId) {
+                      alert('Selecione um destino.');
+                      return;
+                    }
+                    const res = transferTimeBetweenDevices({
+                      fromDeviceId: transferFromDevice.id,
+                      toDeviceId: transferToDeviceId
+                    });
+                    if (!res.ok) {
+                      alert(res.error || 'Falha ao transferir.');
+                      return;
+                    }
+                    pushTimeTransferNetworkSync(transferFromDevice.id, transferToDeviceId);
+                    setShowTransferModal(false);
+                  }}
+                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
+                >
+                  Transferir
+                </button>
+              </div>
             </div>
           </div>
         </div>

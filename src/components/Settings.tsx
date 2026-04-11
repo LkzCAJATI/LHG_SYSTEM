@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { useSettingsStore } from '../store/settingsStore';
 
 export default function Settings() {
@@ -19,6 +20,9 @@ export default function Settings() {
       reader.onloadend = () => {
         const result = reader.result as string;
         setter(result);
+        if (!isClientWallpaper && window.lhgSystem?.broadcastLogo) {
+          window.lhgSystem.broadcastLogo({ url: result });
+        }
         if (isClientWallpaper && window.lhgSystem?.broadcastWallpaper) {
           window.lhgSystem.broadcastWallpaper({ url: result });
         }
@@ -119,7 +123,12 @@ export default function Settings() {
                   </button>
                   {settings.logo && (
                     <button
-                      onClick={() => setLogo(null)}
+                      onClick={() => {
+                        setLogo(null);
+                        if (window.lhgSystem?.broadcastLogo) {
+                          window.lhgSystem.broadcastLogo({ url: '' });
+                        }
+                      }}
                       className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
                     >
                       🗑️ Remover Logo
@@ -295,6 +304,44 @@ export default function Settings() {
                 Produtos com quantidade abaixo deste valor mostrarão alerta
               </p>
             </div>
+
+            <div className="bg-gray-700 rounded-lg p-4">
+              <label className="block text-gray-300 text-sm font-medium mb-2">
+                🧩 Política de Baixa de Estoque (OS)
+              </label>
+              <div className="space-y-2 text-gray-200 text-sm">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="stockDeductionPolicy"
+                    checked={settings.stockDeductionPolicy === 'on_approval'}
+                    onChange={() => updateSettings({ stockDeductionPolicy: 'on_approval' })}
+                    className="w-4 h-4 text-purple-600"
+                  />
+                  Baixar na aprovação do orçamento
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="stockDeductionPolicy"
+                    checked={settings.stockDeductionPolicy === 'on_service_start'}
+                    onChange={() => updateSettings({ stockDeductionPolicy: 'on_service_start' })}
+                    className="w-4 h-4 text-purple-600"
+                  />
+                  Baixar no início do serviço
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="stockDeductionPolicy"
+                    checked={settings.stockDeductionPolicy === 'on_completion'}
+                    onChange={() => updateSettings({ stockDeductionPolicy: 'on_completion' })}
+                    className="w-4 h-4 text-purple-600"
+                  />
+                  Baixar somente ao finalizar a OS (recomendado)
+                </label>
+              </div>
+            </div>
           </div>
         )}
 
@@ -311,7 +358,7 @@ export default function Settings() {
                 Use as etiquetas abaixo no texto para que o sistema preencha automaticamente:
               </p>
               <div className="flex flex-wrap gap-2">
-                {['LOJA', 'CLIENTE', 'VALOR_TOTAL', 'FORMA_PAGAMENTO', 'OBJETO'].map(tag => (
+                {['LOJA', 'CLIENTE', 'CPF', 'VALOR_TOTAL', 'FORMA_PAGAMENTO', 'OBJETO', 'GARANTIA', 'INADIMPLENCIA', 'DATA'].map(tag => (
                   <code key={tag} className="bg-gray-800 text-purple-400 px-2 py-1 rounded text-xs">
                     {'{{' + tag + '}}'}
                   </code>
@@ -325,6 +372,15 @@ export default function Settings() {
                 <textarea
                   value={settings.saleContractTemplate}
                   onChange={(e) => updateSettings({ saleContractTemplate: e.target.value })}
+                  className="w-full h-48 bg-gray-600 border border-gray-500 rounded-lg px-4 py-2 text-white focus:border-purple-500 focus:outline-none font-mono text-sm"
+                />
+              </div>
+
+              <div className="bg-gray-700 rounded-lg p-4">
+                <label className="block text-gray-300 text-sm font-medium mb-2">Contrato de Prestação de Serviços (Reparo / OS)</label>
+                <textarea
+                  value={settings.repairContractTemplate}
+                  onChange={(e) => updateSettings({ repairContractTemplate: e.target.value })}
                   className="w-full h-48 bg-gray-600 border border-gray-500 rounded-lg px-4 py-2 text-white focus:border-purple-500 focus:outline-none font-mono text-sm"
                 />
               </div>
@@ -421,6 +477,65 @@ export default function Settings() {
               </div>
             )}
 
+            {settings.printerType === 'thermal' && (
+              <div className="bg-gray-700 rounded-lg p-4 space-y-4">
+                <div>
+                  <label className="flex items-center gap-2 cursor-pointer text-white">
+                    <input
+                      type="checkbox"
+                      checked={settings.thermalEscPos !== false}
+                      onChange={() =>
+                        updateSettings({ thermalEscPos: settings.thermalEscPos === false })
+                      }
+                      className="w-4 h-4 text-purple-600 rounded"
+                    />
+                    <span>Impressão direta ESC/POS (recomendado no app Windows — evita cupom em branco)</span>
+                  </label>
+                  <p className="text-gray-400 text-xs mt-2 ml-7">
+                    Envia texto e comandos nativos da térmica. Desmarque só se quiser forçar a impressão pelo
+                    navegador.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-gray-300 text-sm font-medium mb-2">
+                    Nome da fila no Windows
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.thermalPrinterName || ''}
+                    onChange={(e) => updateSettings({ thermalPrinterName: e.target.value })}
+                    placeholder="Ex.: POS-58(copy of 1) — vazio = impressora padrão"
+                    className="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:border-purple-500 focus:outline-none text-sm"
+                  />
+                  <p className="text-gray-400 text-xs mt-1">
+                    Igual ao nome em &quot;Dispositivos e impressoras&quot; ou na fila de impressão.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!window.lhgSystem?.printEscPos) {
+                      toast.error('Teste ESC/POS só funciona no aplicativo instalado (Electron), não no navegador.');
+                      return;
+                    }
+                    const res = await window.lhgSystem.printEscPos({
+                      mode: 'test',
+                      settings,
+                      printerName: (settings.thermalPrinterName || '').trim()
+                    });
+                    if (res?.ok) {
+                      toast.success('Comando ESC/POS enviado. Verifique a impressora.');
+                    } else {
+                      toast.error(res?.error || 'Falha ao enviar ESC/POS');
+                    }
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition text-sm"
+                >
+                  Imprimir teste ESC/POS
+                </button>
+              </div>
+            )}
+
             <div className="bg-gray-700 rounded-lg p-4">
               <label className="block text-gray-300 text-sm font-medium mb-3">
                 📄 Testar Impressão
@@ -491,6 +606,7 @@ export default function Settings() {
                   onClick={() => {
                     if (confirm('Deseja resetar todas as configurações?')) {
                       localStorage.removeItem('gamezone-settings');
+                      localStorage.removeItem('lhg-settings');
                       window.location.reload();
                     }
                   }}

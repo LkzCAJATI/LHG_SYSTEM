@@ -6,13 +6,55 @@ import {
   Search, ArrowUp, ArrowDown, History, X, Camera
 } from 'lucide-react';
 
+/** Suporta chaves antigas / alternativas e evita fotos “sumidas” no JSON. */
+function getProductImageSrc(product: Product): string | undefined {
+  const p = product as Product & { imageUrl?: string; photo?: string; foto?: string };
+  const raw = p.image || p.imageUrl || p.photo || p.foto;
+  if (!raw || typeof raw !== 'string') return undefined;
+  const t = raw.trim();
+  return t.length > 0 ? t : undefined;
+}
+
+/** Reduz tamanho do base64 para caber melhor no disco/localStorage (JPEG ~85%). */
+function fileToCompressedDataUrl(file: File, maxWidth = 800): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas não disponível'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Falha ao carregar imagem'));
+    };
+    img.src = url;
+  });
+}
+
 export function Products() {
   const { products, stockMovements, addProduct, updateProduct, deleteProduct, adjustStock } = useStore();
   const [showModal, setShowModal] = useState(false);
   const [showStockModal, setShowStockModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [imageProduct, setImageProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [stockQuantity, setStockQuantity] = useState('');
   const [stockType, setStockType] = useState<'entry' | 'adjustment'>('entry');
@@ -55,6 +97,7 @@ export function Products() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    const normalizedImage = formData.image?.trim() || undefined;
     const productData = {
       barcode: formData.barcode,
       name: formData.name,
@@ -63,6 +106,7 @@ export function Products() {
       cost: Number(formData.cost),
       quantity: Number(formData.quantity),
       minStock: Number(formData.minStock),
+      image: normalizedImage,
     };
 
     if (editingProduct) {
@@ -85,7 +129,7 @@ export function Products() {
       cost: product.cost.toString(),
       quantity: product.quantity.toString(),
       minStock: product.minStock.toString(),
-      image: product.image || '',
+      image: getProductImageSrc(product) || '',
     });
     setShowModal(true);
   };
@@ -157,13 +201,19 @@ export function Products() {
         />
       </div>
 
-      {/* Lista de Produtos */}
-      <div className="bg-white rounded-xl shadow overflow-hidden">
-        <table className="w-full">
+      {/* Lista de Produtos — rolagem horizontal + colunas finais fixas (Estoque/Ações sempre visíveis) */}
+      <p className="text-xs text-gray-500 -mt-2">
+        Não está vendo estoque ou os botões? Role a tabela para a direita — ou use a barra de rolagem abaixo da lista.
+      </p>
+      <div className="bg-white rounded-xl shadow overflow-x-auto">
+        <table className="w-full min-w-[980px]">
           <thead className="bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Código
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Foto
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Produto
@@ -177,22 +227,58 @@ export function Products() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Custo
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-[168px] z-20 bg-gray-50 shadow-[-6px_0_8px_-4px_rgba(0,0,0,0.08)]">
                 Estoque
               </th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-0 z-20 bg-gray-50 shadow-[-6px_0_8px_-4px_rgba(0,0,0,0.08)]">
                 Ações
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {filteredProducts.map(product => (
-              <tr key={product.id} className="hover:bg-gray-50">
+            {filteredProducts.map(product => {
+              const imgSrc = getProductImageSrc(product);
+              return (
+              <tr key={product.id} className="group hover:bg-gray-50">
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className="text-sm text-gray-500 font-mono">{product.barcode || '-'}</span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="font-medium text-gray-900">{product.name}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!imgSrc) return;
+                      setImageProduct(product);
+                      setShowImageModal(true);
+                    }}
+                    className={`w-12 h-12 rounded-lg border overflow-hidden bg-gray-50 flex items-center justify-center ${
+                      imgSrc ? 'hover:ring-2 hover:ring-purple-400 cursor-zoom-in' : 'cursor-default'
+                    }`}
+                    title={imgSrc ? 'Ver imagem' : 'Sem imagem'}
+                  >
+                    {imgSrc ? (
+                      <img src={imgSrc} alt={product.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <Camera size={18} className="text-gray-300" />
+                    )}
+                  </button>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!imgSrc) return;
+                      setImageProduct(product);
+                      setShowImageModal(true);
+                    }}
+                    className={`font-medium text-gray-900 text-left ${
+                      imgSrc ? 'hover:text-purple-700' : ''
+                    }`}
+                    title={imgSrc ? 'Clique para ver a imagem' : 'Sem imagem'}
+                  >
+                    {product.name}
+                  </button>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className="px-2 py-1 bg-gray-100 rounded-full text-sm">
@@ -205,7 +291,7 @@ export function Products() {
                 <td className="px-6 py-4 whitespace-nowrap text-gray-500">
                   R$ {product.cost.toFixed(2)}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
+                <td className="px-4 py-4 whitespace-nowrap sticky right-[168px] z-10 bg-white group-hover:bg-gray-50 shadow-[-6px_0_8px_-4px_rgba(0,0,0,0.06)]">
                   <span className={`px-2 py-1 rounded-full text-sm font-medium ${
                     product.quantity <= product.minStock
                       ? 'bg-red-100 text-red-700'
@@ -214,9 +300,10 @@ export function Products() {
                     {product.quantity} un
                   </span>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
+                <td className="px-4 py-4 whitespace-nowrap text-right space-x-2 sticky right-0 z-10 bg-white group-hover:bg-gray-50 shadow-[-6px_0_8px_-4px_rgba(0,0,0,0.06)]">
                   <button
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setSelectedProduct(product);
                       setShowStockModal(true);
                     }}
@@ -226,7 +313,8 @@ export function Products() {
                     <Package className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setSelectedProduct(product);
                       setShowHistoryModal(true);
                     }}
@@ -236,14 +324,20 @@ export function Products() {
                     <History className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => handleEdit(product)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEdit(product);
+                    }}
                     className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
                     title="Editar"
                   >
                     <Edit className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => handleDelete(product.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(product.id);
+                    }}
                     className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
                     title="Excluir"
                   >
@@ -251,7 +345,8 @@ export function Products() {
                   </button>
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
         
@@ -394,15 +489,21 @@ export function Products() {
                     <input
                       type="file"
                       accept="image/*"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                          const reader = new FileReader();
-                          reader.onloadend = () => {
-                            setFormData(prev => ({ ...prev, image: reader.result as string }));
-                          };
-                          reader.readAsDataURL(file);
+                          try {
+                            const dataUrl = await fileToCompressedDataUrl(file);
+                            setFormData(prev => ({ ...prev, image: dataUrl }));
+                          } catch {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setFormData(prev => ({ ...prev, image: reader.result as string }));
+                            };
+                            reader.readAsDataURL(file);
+                          }
                         }
+                        e.target.value = '';
                       }}
                       className="hidden"
                       id="product-image-input"
@@ -587,6 +688,41 @@ export function Products() {
                 <p className="text-center text-gray-500 py-8">
                   Nenhuma movimentação registrada
                 </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Ver Imagem */}
+      {showImageModal && imageProduct && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-gray-900 truncate">{imageProduct.name}</h3>
+                <p className="text-sm text-gray-500 truncate">{imageProduct.category || 'Sem categoria'}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowImageModal(false);
+                  setImageProduct(null);
+                }}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+                title="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="bg-black flex items-center justify-center">
+              {getProductImageSrc(imageProduct) ? (
+                <img
+                  src={getProductImageSrc(imageProduct)}
+                  alt={imageProduct.name}
+                  className="max-h-[75vh] w-auto object-contain"
+                />
+              ) : (
+                <div className="text-white/70 p-10">Sem imagem</div>
               )}
             </div>
           </div>

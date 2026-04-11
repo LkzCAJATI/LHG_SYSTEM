@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { useStore } from '../store/useStore';
+import { useSettingsStore } from '../store/settingsStore';
 import { Customer } from '../types';
+import { formatMinutesBr, minutesToReais } from '../utils/formatMinutesBr';
 import { Users, Plus, Edit, Trash2, Search, Phone, Mail, X, Clock, Wallet, Eye, EyeOff, CreditCard, Key } from 'lucide-react';
 
 export function Customers() {
   const { customers, sales, addCustomer, updateCustomer, deleteCustomer, addCredits, removeCredits } = useStore();
+  const { settings } = useSettingsStore();
   const [showModal, setShowModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showCreditsModal, setShowCreditsModal] = useState(false);
@@ -116,15 +119,6 @@ export function Customers() {
     setPasswordData({ newPassword: '', confirmPassword: '' });
   };
 
-  const formatTime = (minutes: number) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    if (hours > 0) {
-      return `${hours}h ${mins}min`;
-    }
-    return `${mins}min`;
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -221,10 +215,16 @@ export function Customers() {
             {/* Créditos */}
             <div className="mt-4 pt-4 border-t">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-500">Créditos (tempo)</span>
+                <span className="text-sm text-gray-500">Saldo (tempo)</span>
                 <span className={`font-semibold ${customer.credits > 0 ? 'text-green-600' : 'text-gray-400'}`}>
                   <Clock className="w-4 h-4 inline mr-1" />
-                  {formatTime(customer.credits)}
+                  {formatMinutesBr(customer.credits)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between mb-2 text-xs text-gray-500">
+                <span>Equiv. tarifa PC/h (config.)</span>
+                <span className="font-medium text-gray-700">
+                  ≈ R$ {minutesToReais(customer.credits, settings.pcPricePerHour).toFixed(2)}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -370,9 +370,12 @@ export function Customers() {
             <div className="text-center mb-6">
               <p className="text-gray-600">{selectedCustomer.name}</p>
               <p className="text-3xl font-bold text-purple-600 mt-2">
-                {formatTime(selectedCustomer.credits)}
+                {formatMinutesBr(selectedCustomer.credits)}
               </p>
-              <p className="text-sm text-gray-500">disponíveis</p>
+              <p className="text-sm text-gray-500">de tempo disponível</p>
+              <p className="text-xs text-gray-500 mt-1">
+                ≈ R$ {minutesToReais(selectedCustomer.credits, settings.pcPricePerHour).toFixed(2)} (tarifa PC/h nas configurações)
+              </p>
             </div>
 
             <div className="space-y-4">
@@ -399,7 +402,7 @@ export function Customers() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Quantidade (minutos)
+                  Quantidade (minutos) — ou some com os atalhos abaixo
                 </label>
                 <input
                   type="number"
@@ -408,19 +411,34 @@ export function Customers() {
                   className="w-full px-3 py-2 border rounded-lg"
                   placeholder="Ex: 60"
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Total digitado: <strong>{formatMinutesBr(Number(creditAmount) || 0)}</strong>
+                  {' · '}
+                  ≈ R$ {minutesToReais(Number(creditAmount) || 0, settings.pcPricePerHour).toFixed(2)}
+                </p>
               </div>
 
-              {/* Botões rápidos */}
-              <div className="flex gap-2">
-                {[30, 60, 120, 180].map(mins => (
+              {/* Atalhos: somam ao valor do campo */}
+              <div className="flex flex-wrap gap-2">
+                {[10, 30, 60, 120].map(mins => (
                   <button
                     key={mins}
-                    onClick={() => setCreditAmount(mins.toString())}
-                    className="flex-1 py-2 px-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200"
+                    type="button"
+                    onClick={() =>
+                      setCreditAmount(String((Number(creditAmount) || 0) + mins))
+                    }
+                    className="flex-1 min-w-[4.5rem] py-2 px-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200"
                   >
-                    {mins >= 60 ? `${mins/60}h` : `${mins}min`}
+                    +{mins === 60 ? '1h' : mins === 120 ? '2h' : `${mins}min`}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setCreditAmount('0')}
+                  className="py-2 px-3 bg-white border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  Zerar
+                </button>
               </div>
 
               <button

@@ -1,9 +1,9 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useSettingsStore } from '../store/settingsStore';
 import {
   Monitor, Package, Users, FileText,
-  BarChart3, Settings, LogOut, DollarSign, Gamepad2, Wifi
+  BarChart3, Settings, LogOut, DollarSign, Gamepad2, Wifi, Wrench
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -13,14 +13,23 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const { currentUser, currentPage, setCurrentPage, logout } = useStore();
   const { settings } = useSettingsStore();
+  const [appVersion, setAppVersion] = useState('v1.0.11');
+
+  useEffect(() => {
+    window.lhgSystem?.getInfo().then((info) => {
+      if (info?.version) {
+        setAppVersion(`v${info.version}`);
+      }
+    }).catch(() => undefined);
+  }, []);
 
   const menuItems = [
     { id: 'cashier', label: 'Caixa (PDV)', icon: DollarSign },
     { id: 'dashboard', label: 'Dispositivos', icon: Monitor },
     { id: 'products', label: 'Estoque', icon: Package },
     { id: 'customers', label: 'Clientes', icon: Users },
-    { id: 'budgets', label: 'Orçamentos', icon: FileText },
-    { id: 'service-orders', label: 'Ordens de Serviço', icon: Monitor },
+    { id: 'service-orders', label: 'Fluxo OS', icon: Wrench },
+    { id: 'client-docs', label: 'Documentos Arquivados', icon: FileText },
     { id: 'reports', label: 'Relatórios', icon: BarChart3 },
     { id: 'network', label: 'Rede', icon: Wifi },
     { id: 'users', label: 'Usuários', icon: Settings },
@@ -43,7 +52,7 @@ export function Layout({ children }: LayoutProps) {
             )}
             <div>
               <h1 className="font-bold text-lg truncate max-w-[140px]">{settings.systemName}</h1>
-              <p className="text-xs text-gray-400">Sistema (v1.0.4)</p>
+              <p className="text-xs text-gray-400">Sistema ({appVersion})</p>
             </div>
           </div>
         </div>

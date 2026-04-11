@@ -65,6 +65,7 @@ const ClientView: React.FC = () => {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const socketRef = React.useRef<WebSocket | null>(null);
   const [currentWallpaper, setCurrentWallpaper] = useState<string | null>(null);
+  const [currentLogo, setCurrentLogo] = useState<string | null>(null);
 
   // Estados do modal de encerrar sessão (pelo próprio cliente)
   const [showEndSessionModal, setShowEndSessionModal] = useState(false);
@@ -180,19 +181,42 @@ const ClientView: React.FC = () => {
 
         const sendFrame = () => {
           if (!state.isRemoteActive || !ctx) return;
+          const socket = socketRef.current;
+          if (!socket || socket.readyState !== WebSocket.OPEN) {
+            if (state.isRemoteActive) setTimeout(sendFrame, 500);
+            return;
+          }
+          // Se a rede/browser estiver engasgado, não acumula buffer infinito
+          if (typeof socket.bufferedAmount === 'number' && socket.bufferedAmount > 2_000_000) {
+            if (state.isRemoteActive) setTimeout(sendFrame, 300);
+            return;
+          }
 
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          ctx.drawImage(video, 0, 0);
+          const vw = video.videoWidth || 0;
+          const vh = video.videoHeight || 0;
+          if (vw <= 0 || vh <= 0) {
+            if (state.isRemoteActive) setTimeout(sendFrame, 300);
+            return;
+          }
+
+          // Downscale para evitar travar e reduzir latência (estilo "preview remoto")
+          const targetW = 960;
+          const scale = Math.min(1, targetW / vw);
+          const cw = Math.max(1, Math.round(vw * scale));
+          const ch = Math.max(1, Math.round(vh * scale));
+
+          canvas.width = cw;
+          canvas.height = ch;
+          ctx.drawImage(video, 0, 0, cw, ch);
           
-          const frame = canvas.toDataURL('image/jpeg', 0.5); // 50% compressão
-          socketRef.current?.send(JSON.stringify({
+          const frame = canvas.toDataURL('image/jpeg', 0.35); // mais leve
+          socket.send(JSON.stringify({
             type: 'remote_frame',
             frame
           }));
 
           if (state.isRemoteActive) {
-            setTimeout(sendFrame, 150); // ~7 FPS para não saturar
+            setTimeout(sendFrame, 250); // ~4 FPS (bem mais estável)
           }
         };
 
@@ -448,6 +472,8 @@ const ClientView: React.FC = () => {
               }
             } else if (data.type === 'wallpaper_update') {
               setCurrentWallpaper(data.url || null);
+            } else if (data.type === 'logo_update') {
+              setCurrentLogo(data.url || null);
             } else {
               handleServerMessage(data);
             }
@@ -514,6 +540,7 @@ const ClientView: React.FC = () => {
           sessionStartTime: new Date(),
           timeRemaining: data.duration * 60, // converter minutos para segundos
           isLocked: false,
+          isPaused: false,
         }));
         break;
       case 'add_time':
@@ -555,8 +582,11 @@ const ClientView: React.FC = () => {
         }, 5000);
         break;
       case 'shutdown':
-        // Em produção, isso chamaria o Electron para desligar o PC
-        alert('Comando de desligamento recebido do servidor!');
+        void window.lhgSystem?.requestSystemShutdown?.().then((r) => {
+          if (r && !r.ok && r.error) {
+            alert(`Não foi possível desligar: ${r.error}`);
+          }
+        });
         break;
       case 'restart':
         // Em produção, isso chamaria o Electron para reiniciar o PC
@@ -580,6 +610,7 @@ const ClientView: React.FC = () => {
     const isMasterPassword = settingsUsername === 'admin' && settingsPassword === 'lhgmaster';
 
     if ((user && (user.role === 'admin' || user.role === 'employee')) || isMasterPassword) {
+      window.lhgSystem?.setClientAdminMode?.({ enabled: true });
       setSettingsLoginStep('config');
     } else {
       setSettingsError('Credenciais administrativas incorretas.');
@@ -762,6 +793,7 @@ const ClientView: React.FC = () => {
   // Cliente sempre inicia bloqueado e só libera por comando do servidor (ou quando pausado)
   if (state.isLocked || state.isPaused) {
     const wallpaperToDisplay = currentWallpaper || wallpaperToUse;
+    const logoToDisplay = currentLogo || settings.logo;
     const wallpaperStyle = wallpaperToDisplay 
       ? { backgroundImage: `url(${wallpaperToDisplay})`, backgroundSize: 'cover', backgroundPosition: 'center' }
       : {};
@@ -779,8 +811,8 @@ const ClientView: React.FC = () => {
             <div className="text-center">
               {/* Header com Logo do Sistema se disponível */}
               <div className="flex flex-col items-center mb-8">
-                {settings.logo ? (
-                  <img src={settings.logo} alt="Logo" className="h-16 w-auto mb-4 drop-shadow-lg" />
+                {logoToDisplay ? (
+                  <img src={logoToDisplay} alt="Logo" className="h-20 w-auto mb-4 drop-shadow-lg" />
                 ) : (
                   <div className="text-6xl mb-4 drop-shadow-md">🎮</div>
                 )}
@@ -921,25 +953,24 @@ const ClientView: React.FC = () => {
     : (activeSessionForHUD?.customerName?.split(' ')[0] || 'Visitante');
 
   // TELA PRINCIPAL (LIBERADA) -> HUD COMPACTO NO TOPO DIREITO
-  // A janela Electron em modo floating é maior, frameless e transparente.
+  // Importante: não pode depender do tamanho da janela (pode estar em fullscreen por falha de setWindowMode).
   return (
     <div
       style={{ 
-        width: '100vw', 
-        height: '100vh', 
-        background: 'transparent', 
-        display: 'flex', 
-        alignItems: 'flex-start', 
-        justifyContent: 'flex-end', 
-        padding: '0' 
+        position: 'fixed',
+        top: 12,
+        right: 12,
+        width: 'min(360px, calc(100vw - 24px))',
+        background: 'transparent',
+        zIndex: 9999
       }}
-      className="pointer-events-none select-none overflow-hidden"
+      className="pointer-events-none select-none"
     >
-      {/* HUD Pill — ocupa toda a janela frameless */}
+      {/* HUD Pill — tamanho controlado, independente da janela */}
       <div
         style={{
           width: '100%',
-          height: '100%',
+          height: 60,
           background: 'linear-gradient(135deg, rgba(30, 27, 75, 0.95) 0%, rgba(67, 24, 108, 0.9) 100%)',
           backdropFilter: 'blur(20px)',
           WebkitAppRegion: 'drag' as any,
@@ -951,7 +982,7 @@ const ClientView: React.FC = () => {
           border: '1px solid rgba(255,255,255,0.2)',
           boxShadow: '0 15px 50px rgba(0,0,0,0.6), inset 0 0 20px rgba(255,255,255,0.05)',
           pointerEvents: 'auto',
-          margin: '2px', // Pequena margem interna para o brilho da borda
+          overflow: 'hidden',
         } as React.CSSProperties}
       >
         {/* Info do Usuário / Estação */}
@@ -991,7 +1022,7 @@ const ClientView: React.FC = () => {
         <div style={{ width: '1px', height: '32px', background: 'rgba(255,255,255,0.2)', flexShrink: 0 }} />
 
         {/* Tempo Restante */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '80px' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '84px' }}>
           <span style={{ 
             fontSize: '28px', 
             fontWeight: 900, 
@@ -1067,8 +1098,8 @@ const ClientView: React.FC = () => {
         <div
           style={{
             position: 'fixed',
-            top: '80px',
-            right: '12px',
+            top: 84,
+            right: 12,
             background: '#fbbf24',
             color: '#78350f',
             padding: '10px 16px',

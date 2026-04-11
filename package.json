@@ -1,7 +1,7 @@
 {
   "name": "lhg-system",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.56",
   "type": "module",
   "main": "electron/main.cjs",
   "repository": {
@@ -22,6 +22,8 @@
     "clsx": "2.1.1",
     "date-fns": "^4.1.0",
     "electron-updater": "^6.8.3",
+    "iconv-lite": "^0.7.2",
+    "jimp": "^0.16.13",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^1.7.0",
@@ -35,6 +37,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.17",
+    "@types/jszip": "^3.4.0",
     "@types/node": "22.19.17",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
@@ -54,6 +57,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "mobile/**/*",
       "package.json"
     ],
     "directories": {
@@ -82,5 +86,5 @@
       "releaseType": "release"
     }
   },
-  "buildVersion": "1.0.0.5"
+  "buildVersion": "1.0.0.56"
 }
